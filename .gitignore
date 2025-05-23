@@ -19,3 +19,4 @@ wandb/
 build/
 *.simg
 data
+/.idea

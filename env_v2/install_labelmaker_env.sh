@@ -7,6 +7,7 @@ git submodule update --init --recursive
 env_name=labelmaker
 dir_name="$(pwd)/$(dirname "$0")"
 
+echo "dir_name:"
 echo $dir_name
 
 # decide which version of python cuda pytorch torchvision to use
@@ -43,6 +44,7 @@ pip install packaging
 python $dir_name/versions.py --target_cuda_version $target_cuda_version --target_torch_version $target_torch_version --target_gcc_version $target_gcc_version
 
 source $dir_name/INSTALLED_VERSIONS.sh
+
 echo $INSTALLED_CUDA_VERSION
 echo $INSTALLED_CUDA_ABBREV
 echo $INSTALLED_PYTORCH_VERSION
@@ -50,10 +52,10 @@ echo $INSTALLED_GCC_VERSION
 echo $INSTALLED_TORCHVISION_VERSION
 echo $INSTALLED_OPEN3D_URL
 
-conda install -y -c "conda-forge" gxx=$INSTALLED_GCC_VERSION
-conda install -y -c conda-forge sysroot_linux-64=2.17
-conda install -y -c "nvidia/label/cuda-$INSTALLED_CUDA_VERSION" cuda
-conda install -y -c anaconda openblas=0.3.20
+conda install -y -c "conda-forge" gxx=$INSTALLED_GCC_VERSION  # install gcc
+conda install -y -c conda-forge sysroot_linux-64=2.17  #
+conda install -y -c "nvidia/label/cuda-$INSTALLED_CUDA_VERSION" cuda # install cuda
+conda install -y -c anaconda openblas=0.3.20  # install openblas
 
 conda deactivate
 conda activate $env_name
