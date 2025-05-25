@@ -36,288 +36,288 @@ log = logging.getLogger('OV-Seg Segmentation')
 
 
 def setup_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
-  random.seed(seed)
-  np.random.seed(seed)
-  torch.manual_seed(seed)
-
-  cudnn.benchmark = False
-  cudnn.deterministic = True
+    cudnn.benchmark = False
+    cudnn.deterministic = True
 
 
 class WordnetPromptTemplate:
 
-  def __init__(self, template, add_synonyms=True):
-    self.template = template
-    self.add_synonyms = add_synonyms
+    def __init__(self, template, add_synonyms=True):
+        self.template = template
+        self.add_synonyms = add_synonyms
 
-  def format(self, noun):
-    synset = wn.synset(noun)
-    prompt = self.template.format(noun=synset.name().split('.')[0],
-                                  definition=synset.definition())
-    if self.add_synonyms and len(synset.lemma_names()) > 1:
-      prompt += " It can also be called {}".format(", ".join(
-          synset.lemma_names()[1:]))
-    return prompt
+    def format(self, noun):
+        synset = wn.synset(noun)
+        prompt = self.template.format(noun=synset.name().split('.')[0],
+                                      definition=synset.definition())
+        if self.add_synonyms and len(synset.lemma_names()) > 1:
+            prompt += " It can also be called {}".format(", ".join(
+                synset.lemma_names()[1:]))
+        return prompt
 
-  def __str__(self):
-    return str(self.template)
+    def __str__(self):
+        return str(self.template)
 
 
 def load_ovseg(
-    device: Union[str, torch.device],
-    custom_templates=None,
+        device: Union[str, torch.device],
+        custom_templates=None,
 ):
-  cfg = get_cfg()
-  add_deeplab_config(cfg)
-  add_ovseg_config(cfg)
-  cfg.merge_from_file(
-      str(
-          Path(__file__).parent / '..' / '3rdparty' / 'ov-seg' / 'configs' /
-          'ovseg_swinB_vitL_demo.yaml'))
-  cfg.merge_from_list([
-      'MODEL.WEIGHTS',
-      str(
-          Path(__file__).parent / '..' / 'checkpoints' /
-          'ovseg_swinbase_vitL14_ft_mpt.pth')
-  ])
+    cfg = get_cfg()
+    add_deeplab_config(cfg)
+    add_ovseg_config(cfg)
+    cfg.merge_from_file(
+        str(
+            Path(__file__).parent / '..' / '3rdparty' / 'ov-seg' / 'configs' /
+            'ovseg_swinB_vitL_demo.yaml'))
+    cfg.merge_from_list([
+        'MODEL.WEIGHTS',
+        str(
+            Path(__file__).parent / '..' / 'checkpoints' /
+            'ovseg_swinbase_vitL14_ft_mpt.pth')
+    ])
 
-  # add device information
-  cfg.MODEL.DEVICE = str(device)
+    # add device information
+    cfg.MODEL.DEVICE = str(device)
 
-  if custom_templates is not None:
-    cfg.MODEL.CLIP_ADAPTER.TEXT_TEMPLATES = "predefined"
-    cfg.MODEL.CLIP_ADAPTER.PREDEFINED_PROMPT_TEMPLATES = custom_templates
-  cfg.freeze()
-  demo = VisualizationDemo(cfg)
-  return demo
+    if custom_templates is not None:
+        cfg.MODEL.CLIP_ADAPTER.TEXT_TEMPLATES = "predefined"
+        cfg.MODEL.CLIP_ADAPTER.PREDEFINED_PROMPT_TEMPLATES = custom_templates
+    cfg.freeze()
+    demo = VisualizationDemo(cfg)
+    return demo
 
 
 def process_image(
-    model,
-    img_path,
-    class_names,
-    id_map,
-    threshold=0.7,
-    flip=False,
+        model,
+        img_path,
+        class_names,
+        id_map,
+        threshold=0.7,
+        flip=False,
 ):
-  # use PIL, to be consistent with evaluation
-  img = read_image(img_path, format="BGR")
-  if flip:
-    img = img[:, ::-1]
-  predictions = model.predictor(img, class_names)
-  blank_area = (predictions['sem_seg'][0] == 0).to('cpu').numpy()
-  product, pred = torch.max(predictions['sem_seg'], dim=0)
+    # use PIL, to be consistent with evaluation
+    img = read_image(img_path, format="BGR")
+    if flip:
+        img = img[:, ::-1]
+    predictions = model.predictor(img, class_names)
+    blank_area = (predictions['sem_seg'][0] == 0).to('cpu').numpy()
+    product, pred = torch.max(predictions['sem_seg'], dim=0)
 
-  # map unknown region to last_id + 1
-  pred[product < threshold] = len(class_names)
-  pred[blank_area] = len(class_names)
+    # map unknown region to last_id + 1
+    pred[product < threshold] = len(class_names)
+    pred[blank_area] = len(class_names)
 
-  pred = pred.to('cpu').numpy().astype(int)
+    pred = pred.to('cpu').numpy().astype(int)
 
-  if flip:
-    pred = pred[:, ::-1]
+    if flip:
+        pred = pred[:, ::-1]
 
-  # map to corresponding label space
-  pred = id_map[pred]
+    # map to corresponding label space
+    pred = id_map[pred]
 
-  return pred
+    return pred
 
 
 def get_id_map(classes):
-  """
-  In ovseg, the unknown class is not specified in class_names, it is temporarily mapped to the last_id + 1. However, depending on the starting point of each label scheme its mapping may be different.
-  """
-  if classes == 'ade150':
-    id_map = [x['id'] for x in get_ade150()] + [150]
-  elif classes == 'replica':
-    id_map = [x['id'] for x in get_replica()] + [0]
-  elif classes in ['wordnet', 'wn_nosyn', 'wn_nodef', 'wn_nosyn_nodef']:
-    id_map = [x['id'] for x in get_wordnet()[1:]] + [0]
-  else:
-    raise ValueError(f'Unknown class set {classes}')
+    """
+    In ovseg, the unknown class is not specified in class_names, it is temporarily mapped to the last_id + 1. However, depending on the starting point of each label scheme its mapping may be different.
+    """
+    if classes == 'ade150':
+        id_map = [x['id'] for x in get_ade150()] + [150]
+    elif classes == 'replica':
+        id_map = [x['id'] for x in get_replica()] + [0]
+    elif classes in ['wordnet', 'wn_nosyn', 'wn_nodef', 'wn_nosyn_nodef']:
+        id_map = [x['id'] for x in get_wordnet()[1:]] + [0]
+    else:
+        raise ValueError(f'Unknown class set {classes}')
 
-  return np.array(id_map)
+    return np.array(id_map)
 
 
 def get_templates(classes):
-  templates = None
-  if classes == 'ade150':
-    class_names = [x['name'] for x in get_ade150()]
-  elif classes == 'replica':
-    class_names = [x['name'] for x in get_replica()]
-  elif classes == 'wordnet':
-    sizeless_templates = [
-        "a photo of a {size}{noun}, which is {definition}.",
-        "a photo of a {size}{noun}, which can be defined as {definition}.",
-        "a photo of a {size}{noun}, as in {definition}.",
-        "This is a photo of a {size}{noun}, which is {definition}",
-        "This is a photo of a {size}{noun}, which can be defined as {definition}",
-        "This is a photo of a {size}{noun}, as in {definition}",
-        "There is a {size}{noun} in the scene",
-        "There is a {size}{definition} in the scene",
-        "There is the {size}{noun} in the scene",
-        "There is the {size}{definition} in the scene",
-        "a photo of a {size}{noun} in the scene",
-        "a photo of a {size}{definition} in the scene",
-    ]
-    templates = []
-    for t in sizeless_templates:
-      for s in ["", "small ", "medium ", "large "]:
-        templates.append(
-            WordnetPromptTemplate(
-                t.format(size=s, noun="{noun}", definition="{definition}")))
-    # the first class is the background class
-    class_names = [x['name'] for x in get_wordnet()[1:]]
-  elif classes == 'wn_nosyn':
-    sizeless_templates = [
-        "a photo of a {size}{noun}, which is {definition}.",
-        "a photo of a {size}{noun}, which can be defined as {definition}.",
-        "a photo of a {size}{noun}, as in {definition}.",
-        "This is a photo of a {size}{noun}, which is {definition}",
-        "This is a photo of a {size}{noun}, which can be defined as {definition}",
-        "This is a photo of a {size}{noun}, as in {definition}",
-        "There is a {size}{noun} in the scene",
-        "There is a {size}{definition} in the scene",
-        "There is the {size}{noun} in the scene",
-        "There is the {size}{definition} in the scene",
-        "a photo of a {size}{noun} in the scene",
-        "a photo of a {size}{definition} in the scene",
-    ]
-    templates = []
-    for t in sizeless_templates:
-      for s in ["", "small ", "medium ", "large "]:
-        templates.append(
-            WordnetPromptTemplate(t.format(size=s,
-                                           noun="{noun}",
-                                           definition="{definition}"),
-                                  add_synonyms=False))
-    # the first class is the background class
-    class_names = [x['name'] for x in get_wordnet()[1:]]
-  elif classes == 'wn_nodef':
-    sizeless_templates = [
-        "a photo of a {size}{noun}",
-        "a photo of a {size}{noun}",
-        "a photo of a {size}{noun}",
-        "This is a photo of a {size}{noun}.",
-        "This is a photo of a {size}{noun}.",
-        "This is a photo of a {size}{noun}.",
-        "There is a {size}{noun} in the scene",
-        "There is the {size}{noun} in the scene",
-        "a photo of a {size}{noun} in the scene",
-    ]
-    templates = []
-    for t in sizeless_templates:
-      for s in ["", "small ", "medium ", "large "]:
-        templates.append(WordnetPromptTemplate(t.format(size=s, noun="{noun}")))
-    # the first class is the background class
-    class_names = [x['name'] for x in get_wordnet()[1:]]
-  elif classes == 'wn_nosyn_nodef':
-    sizeless_templates = [
-        "a photo of a {size}{noun}",
-        "a photo of a {size}{noun}",
-        "a photo of a {size}{noun}",
-        "This is a photo of a {size}{noun}.",
-        "This is a photo of a {size}{noun}.",
-        "This is a photo of a {size}{noun}.",
-        "There is a {size}{noun} in the scene",
-        "There is the {size}{noun} in the scene",
-        "a photo of a {size}{noun} in the scene",
-    ]
-    templates = []
-    for t in sizeless_templates:
-      for s in ["", "small ", "medium ", "large "]:
-        templates.append(
-            WordnetPromptTemplate(t.format(size=s, noun="{noun}"),
-                                  add_synonyms=False))
-    # the first class is the background class
-    class_names = [x['name'] for x in get_wordnet()[1:]]
-  else:
-    raise ValueError(f'Unknown class set {classes}')
+    templates = None
+    if classes == 'ade150':
+        class_names = [x['name'] for x in get_ade150()]
+    elif classes == 'replica':
+        class_names = [x['name'] for x in get_replica()]
+    elif classes == 'wordnet':
+        sizeless_templates = [
+            "a photo of a {size}{noun}, which is {definition}.",
+            "a photo of a {size}{noun}, which can be defined as {definition}.",
+            "a photo of a {size}{noun}, as in {definition}.",
+            "This is a photo of a {size}{noun}, which is {definition}",
+            "This is a photo of a {size}{noun}, which can be defined as {definition}",
+            "This is a photo of a {size}{noun}, as in {definition}",
+            "There is a {size}{noun} in the scene",
+            "There is a {size}{definition} in the scene",
+            "There is the {size}{noun} in the scene",
+            "There is the {size}{definition} in the scene",
+            "a photo of a {size}{noun} in the scene",
+            "a photo of a {size}{definition} in the scene",
+        ]
+        templates = []
+        for t in sizeless_templates:
+            for s in ["", "small ", "medium ", "large "]:
+                templates.append(
+                    WordnetPromptTemplate(
+                        t.format(size=s, noun="{noun}", definition="{definition}")))
+        # the first class is the background class
+        class_names = [x['name'] for x in get_wordnet()[1:]]
+    elif classes == 'wn_nosyn':
+        sizeless_templates = [
+            "a photo of a {size}{noun}, which is {definition}.",
+            "a photo of a {size}{noun}, which can be defined as {definition}.",
+            "a photo of a {size}{noun}, as in {definition}.",
+            "This is a photo of a {size}{noun}, which is {definition}",
+            "This is a photo of a {size}{noun}, which can be defined as {definition}",
+            "This is a photo of a {size}{noun}, as in {definition}",
+            "There is a {size}{noun} in the scene",
+            "There is a {size}{definition} in the scene",
+            "There is the {size}{noun} in the scene",
+            "There is the {size}{definition} in the scene",
+            "a photo of a {size}{noun} in the scene",
+            "a photo of a {size}{definition} in the scene",
+        ]
+        templates = []
+        for t in sizeless_templates:
+            for s in ["", "small ", "medium ", "large "]:
+                templates.append(
+                    WordnetPromptTemplate(t.format(size=s,
+                                                   noun="{noun}",
+                                                   definition="{definition}"),
+                                          add_synonyms=False))
+        # the first class is the background class
+        class_names = [x['name'] for x in get_wordnet()[1:]]
+    elif classes == 'wn_nodef':
+        sizeless_templates = [
+            "a photo of a {size}{noun}",
+            "a photo of a {size}{noun}",
+            "a photo of a {size}{noun}",
+            "This is a photo of a {size}{noun}.",
+            "This is a photo of a {size}{noun}.",
+            "This is a photo of a {size}{noun}.",
+            "There is a {size}{noun} in the scene",
+            "There is the {size}{noun} in the scene",
+            "a photo of a {size}{noun} in the scene",
+        ]
+        templates = []
+        for t in sizeless_templates:
+            for s in ["", "small ", "medium ", "large "]:
+                templates.append(WordnetPromptTemplate(t.format(size=s, noun="{noun}")))
+        # the first class is the background class
+        class_names = [x['name'] for x in get_wordnet()[1:]]
+    elif classes == 'wn_nosyn_nodef':
+        sizeless_templates = [
+            "a photo of a {size}{noun}",
+            "a photo of a {size}{noun}",
+            "a photo of a {size}{noun}",
+            "This is a photo of a {size}{noun}.",
+            "This is a photo of a {size}{noun}.",
+            "This is a photo of a {size}{noun}.",
+            "There is a {size}{noun} in the scene",
+            "There is the {size}{noun} in the scene",
+            "a photo of a {size}{noun} in the scene",
+        ]
+        templates = []
+        for t in sizeless_templates:
+            for s in ["", "small ", "medium ", "large "]:
+                templates.append(
+                    WordnetPromptTemplate(t.format(size=s, noun="{noun}"),
+                                          add_synonyms=False))
+        # the first class is the background class
+        class_names = [x['name'] for x in get_wordnet()[1:]]
+    else:
+        raise ValueError(f'Unknown class set {classes}')
 
-  return templates, class_names
+    return templates, class_names
 
 
 @gin.configurable
 def run(
-    scene_dir: Union[str, Path],
-    output_folder: Union[str, Path],
-    device: Union[
-        str, torch.
-        device] = 'cuda:0',  # changing this to cuda default as all of us have it available. Otherwise, it will fail on machines without cuda
-    classes='wn_nodef',
-    flip=False,
+        scene_dir: Union[str, Path],
+        output_folder: Union[str, Path],
+        device: Union[
+            str, torch.
+            device] = 'cuda:0',
+        # changing this to cuda default as all of us have it available. Otherwise, it will fail on machines without cuda
+        classes='wn_nodef',
+        flip=False,
 ):
-  scene_dir = Path(scene_dir)
-  output_folder = Path(output_folder)
+    scene_dir = Path(scene_dir)
+    output_folder = Path(output_folder)
 
-  # check if scene_dir exists
-  assert scene_dir.exists() and scene_dir.is_dir()
+    # check if scene_dir exists
+    assert scene_dir.exists() and scene_dir.is_dir()
 
-  input_color_dir = scene_dir / 'color'
-  assert input_color_dir.exists() and input_color_dir.is_dir()
+    input_color_dir = scene_dir / 'color'
+    assert input_color_dir.exists() and input_color_dir.is_dir()
 
-  output_dir = scene_dir / output_folder
-  output_dir = Path(str(output_dir) + '_flip') if flip else output_dir
-  if classes != 'wn_nodef':
-    output_dir.replace('wn_nodef', classes)
+    output_dir = scene_dir / output_folder
+    output_dir = Path(str(output_dir) + '_flip') if flip else output_dir
+    if classes != 'wn_nodef':
+        output_dir.replace('wn_nodef', classes)
 
-  # check if output directory exists
-  shutil.rmtree(output_dir, ignore_errors=True)
-  os.makedirs(str(output_dir), exist_ok=False)
+    # check if output directory exists
+    shutil.rmtree(output_dir, ignore_errors=True)
+    os.makedirs(str(output_dir), exist_ok=False)
 
-  input_files = input_color_dir.glob('*')
-  input_files = sorted(input_files, key=lambda x: int(x.stem.split('_')[-1]))
+    input_files = input_color_dir.glob('*')
+    input_files = sorted(input_files, key=lambda x: int(x.stem.split('_')[-1]))
 
-  log.info(f'[ov-seg] using {classes} classes')
-  log.info(f'[ov-seg] inference in {str(input_color_dir)}')
+    log.info(f'[ov-seg] using {classes} classes')
+    log.info(f'[ov-seg] inference in {str(input_color_dir)}')
 
-  templates, class_names = get_templates(classes)
-  id_map = get_id_map(classes)
+    templates, class_names = get_templates(classes)
+    id_map = get_id_map(classes)
 
-  log.info('[ov-seg] loading model')
-  model = load_ovseg(device=device, custom_templates=templates)
+    log.info('[ov-seg] loading model')
+    model = load_ovseg(device=device, custom_templates=templates)
 
-  log.info('[ov-seg] inference')
+    log.info('[ov-seg] inference')
 
-  for file in tqdm(input_files):
-    result = process_image(model, file, class_names, id_map, flip=flip)
-    cv2.imwrite(
-        str(output_dir / f'{file.stem}.png'),
-        result.astype(np.uint16),
-    )
+    for file in tqdm(input_files):
+        result = process_image(model, file, class_names, id_map, flip=flip)
+        cv2.imwrite(
+            str(output_dir / f'{file.stem}.png'),
+            result.astype(np.uint16),
+        )
 
 
 def arg_parser():
-  parser = argparse.ArgumentParser(description='OVSeg Segmentation')
-  parser.add_argument(
-      '--workspace',
-      type=str,
-      required=True,
-      help=
-      'Path to workspace directory. There should be a "color" folder inside.',
-  )
-  parser.add_argument(
-      '--output',
-      type=str,
-      default='intermediate/wordnet_ovseg_1',
-      help=
-      'Name of output directory in the workspace directory intermediate. Has to follow the pattern $labelspace_$model_$version',
-  )
-  parser.add_argument('--seed', type=int, default=42, help='random seed')
-  parser.add_argument(
-      '--flip',
-      action="store_true",
-      help='Flip the input image, this is part of test time augmentation.',
-  )
-  parser.add_argument('--config', help='Name of config file')
-  return parser.parse_args()
+    parser = argparse.ArgumentParser(description='OVSeg Segmentation')
+    parser.add_argument(
+        '--workspace',
+        type=str,
+        required=True,
+        help=
+        'Path to workspace directory. There should be a "color" folder inside.',
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='intermediate/wordnet_ovseg_1',
+        help=
+        'Name of output directory in the workspace directory intermediate. Has to follow the pattern $labelspace_$model_$version',
+    )
+    parser.add_argument('--seed', type=int, default=42, help='random seed')
+    parser.add_argument(
+        '--flip',
+        action="store_true",
+        help='Flip the input image, this is part of test time augmentation.',
+    )
+    parser.add_argument('--config', help='Name of config file')
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
-  args = arg_parser()
-  if args.config is not None:
-    gin.parse_config_file(args.config)
+    args = arg_parser()
+    if args.config is not None:
+        gin.parse_config_file(args.config)
 
-  setup_seeds(seed=args.seed)
-  run(scene_dir=args.workspace, output_folder=args.output, flip=args.flip)
+    setup_seeds(seed=args.seed)
+    run(scene_dir=args.workspace, output_folder=args.output, flip=args.flip)

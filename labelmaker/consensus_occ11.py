@@ -25,12 +25,16 @@ class PredictorVoting:
         matcher_ade150 = LabelMatcher('ade20k', output_space)
         matcher_nyu40 = LabelMatcher('nyu40id', output_space)
         matcher_wn199 = LabelMatcher('wn199', output_space)  # wordnet
-        matcher_scannet = LabelMatcher('id', output_space)
+        matcher_scannet = LabelMatcher('id', output_space)  # scannet -> output space
+        mathcer_occ11 = LabelMatcher('occ11_id', output_space) # occ11_id -> output space
+
         self.output_space = output_space
         # build lookup tables for predictor voting
         # some class spaces vote for multiple options in the wordnet output space
         self.output_size = max(matcher_ade150.right_ids) + 1
         output_ids = np.arange(self.output_size)
+
+        ###############
         self.votes_from_ade150 = np.zeros((150, self.output_size), dtype=np.uint8)
         for ade150_id in range(150):
             multihot_matches = matcher_ade150.match(
@@ -38,7 +42,7 @@ class PredictorVoting:
             multihot_matches[multihot_matches == -1] = 0
             multihot_matches[multihot_matches == -2] = 0
             self.votes_from_ade150[ade150_id] = multihot_matches
-
+        ###############
         self.votes_from_nyu40 = np.zeros((41, self.output_size), dtype=np.uint8)
         for nyu40_id in range(1, 41):
             multihot_matches = matcher_nyu40.match(
@@ -46,7 +50,7 @@ class PredictorVoting:
             multihot_matches[multihot_matches == -1] = 0
             multihot_matches[multihot_matches == -2] = 0
             self.votes_from_nyu40[nyu40_id] = multihot_matches
-
+        ###############
         self.votes_from_wn199 = np.zeros((200, self.output_size), dtype=np.uint8)
         for wn199_id in range(1, 189):
             multihot_matches = matcher_wn199.match(
@@ -54,7 +58,7 @@ class PredictorVoting:
             multihot_matches[multihot_matches == -1] = 0
             multihot_matches[multihot_matches == -2] = 0
             self.votes_from_wn199[wn199_id] = multihot_matches
-
+        ################
         scannet_dimensionality = max(matcher_scannet.left_ids) + 1
         self.votes_from_scannet = np.zeros(
             (scannet_dimensionality, self.output_size), dtype=np.uint8)
@@ -64,12 +68,24 @@ class PredictorVoting:
             multihot_matches[multihot_matches == -1] = 0
             multihot_matches[multihot_matches == -2] = 0
             self.votes_from_scannet[scannet_id] = multihot_matches
+        #################
+        self.votes_from_occ11 = np.zeros((12, self.output_size), dtype=np.uint8)
+        for occ11_id in range(1, 12):
+            multihot_matches = mathcer_occ11.match(
+                occ11_id * np.ones_like(output_ids), output_ids)
+            multihot_matches[multihot_matches == -1] = 0
+            multihot_matches[multihot_matches == -2] = 0
+            self.votes_from_occ11[occ11_id] = multihot_matches
+
+
 
     def voting(self,
                ade20k_predictions=[],
                nyu40_predictions=[],
                wn199_predictions=[],
-               scannet_predictions=[]):
+               scannet_predictions=[],
+               occ11_predictions=[]
+               ):
         """Voting scheme for combining multiple segmentation predictors.
 
             Args:
@@ -77,6 +93,7 @@ class PredictorVoting:
                 nyu40_predictors (list): list of nyu40 predictions
                 wn199_predictors (list): list of wn199 predictions
                 scannet_predictions (list): list of scannet predictions
+                occ11_predictions (list): list of occ11 predictions
 
             Returns:
                 np.ndarray: consensus prediction in the output space
@@ -90,10 +107,12 @@ class PredictorVoting:
             shape = wn199_predictions[0].shape[:2]
         elif len(scannet_predictions) > 0:
             shape = scannet_predictions[0].shape[:2]
+        elif len(occ11_predictions) > 0:
+            shape = occ11_predictions[0].shape[:2]
 
         # build consensus prediction
         # first, each prediction votes for classes in the output space
-        votes = np.zeros((shape[0], shape[1], self.output_size), dtype=np.uint8)
+        votes = np.zeros((shape[0], shape[1], self.output_size), dtype=np.uint8)  # 图像大小
         for pred in wn199_predictions:
             vote = self.votes_from_wn199[pred]
             vote[pred == -1] = 0
@@ -108,9 +127,14 @@ class PredictorVoting:
         for pred in scannet_predictions:
             votes += self.votes_from_scannet[pred]
 
-        pred_vote = np.argmax(votes, axis=2)
-        n_votes = votes[np.arange(shape[0])[:, None],
-        np.arange(shape[1]), pred_vote]
+        for pred in occ11_predictions:
+            votes += self.votes_from_occ11[pred]
+
+        pred_vote = np.argmax(votes, axis=2)  # 根据最大投票决定每个像素最终的预测类被
+        n_votes = votes[
+            np.arange(shape[0])[:, None],
+            np.arange(shape[1]),
+            pred_vote]  # 拿出对应的票数
         # n_votes = np.amax(votes, axis=2)
         # # fastest check for ambiguous prediction: take the argmax in reverse order
         # alt_pred = (self.output_size - 1) - np.argmax(votes[:, :, ::-1],
@@ -119,7 +143,7 @@ class PredictorVoting:
         return n_votes, pred_vote
 
 
-VALID_LABEL_SPACES = ['ade20k', 'nyu40', 'scannet200', 'wordnet', 'scannet']
+VALID_LABEL_SPACES = ['ade20k', 'nyu40', 'scannet200', 'wordnet', 'scannet', 'occ11']
 
 
 def consensus(k, folders, output_dir, min_votes):
@@ -139,7 +163,8 @@ def consensus(k, folders, output_dir, min_votes):
         ade20k_predictions=predictions['ade20k'],
         nyu40_predictions=predictions['nyu40'],
         wn199_predictions=predictions['wordnet'],
-        scannet_predictions=predictions['scannet200']
+        scannet_predictions=predictions['scannet200'],
+        occ11_predictions=predictions['occ11'],
     )  # double even without flipping
 
     pred_vote[n_votes < min_votes] = 0  # 最小vote是2
@@ -188,14 +213,16 @@ def run(scene_dir: Union[str, Path],
         if n_files is None:
             n_files = len(files)
         else:
-            assert n_files == len(
-                files
-            ), f'Number of files in {folder} does not match {n_files} vs. {len(files)}'
+            assert n_files == len(files), f'Number of files in {folder} does not match {n_files} vs. {len(files)}'
 
     keys = sorted([s.stem for s in (scene_dir / 'color').iterdir()])
 
     input_folders_str = [str(f) for f in input_folders]
     output_dir_str = str(output_dir)
+
+    # # for debug
+    # for k in keys:
+    #     wrapper_consensus(k, input_folders_str, output_dir_str, min_votes)
 
     # Using Parallel to run the function in parallel
     results = Parallel(n_jobs=n_jobs)(delayed(wrapper_consensus)(

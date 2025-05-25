@@ -60,6 +60,8 @@ def main(
         output_file: Union[str, Path],
         output_mesh: Union[str, Path],
         maximum_label: int,
+        label_key='occ11_id',
+        output_key='occ11_id',
 ):
     scene_dir = Path(scene_dir)
     label_folder = Path(label_folder)
@@ -167,9 +169,8 @@ def main(
     # for item in get_wordnet():
     #     color_map[item['id']] = item['color']
     ############# before ##########
-    for item in get_wordnet(label_key='occ11_id'):
+    for item in get_wordnet(label_key='occ11_id', output_key='occ11_id'):
         color_map[item['id']] = item['color']
-
 
     label_mesh_color = color_map[labels_3d]  # 根据wordnet的映射来生成mesh color
 
@@ -215,6 +216,9 @@ def arg_parser():
         help='Max label value',
     )
     parser.add_argument('--config', help='Name of config file')
+    parser.add_argument('--label_key', default='occ_11')
+    parser.add_argument('--output_key', default='occ_11')
+
     return parser.parse_args()
 
 
@@ -228,4 +232,6 @@ if __name__ == '__main__':
         output_file=args.output,
         output_mesh=args.output_mesh,
         maximum_label=args.max_label,
+        label_key=args.label_key,
+        output_key=args.output_key
     )

@@ -177,7 +177,7 @@ class LabelMatcher:
             returns a matrix of same shape as left and right, where
             1 indicates a match, 0 indicates a mismatch and -1 indicates
             that there is no known mapping
-            """
+        """
         left = left.astype(int)
         right = right.astype(int)
         if self.left_to_right:
