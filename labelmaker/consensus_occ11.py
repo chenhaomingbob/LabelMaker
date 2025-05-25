@@ -24,7 +24,7 @@ class PredictorVoting:
         # assert output_space == 'wn199'
         matcher_ade150 = LabelMatcher('ade20k', output_space)
         matcher_nyu40 = LabelMatcher('nyu40id', output_space)
-        matcher_wn199 = LabelMatcher('wn199', output_space) # wordnet
+        matcher_wn199 = LabelMatcher('wn199', output_space)  # wordnet
         matcher_scannet = LabelMatcher('id', output_space)
         self.output_space = output_space
         # build lookup tables for predictor voting
@@ -123,7 +123,8 @@ VALID_LABEL_SPACES = ['ade20k', 'nyu40', 'scannet200', 'wordnet', 'scannet']
 
 
 def consensus(k, folders, output_dir, min_votes):
-    votebox = PredictorVoting(output_space='wn199-merged-v2')
+    # votebox = PredictorVoting(output_space='wn199-merged-v2') # 原始的
+    votebox = PredictorVoting(output_space='occ11_id')
 
     predictions = {label_space: [] for label_space in VALID_LABEL_SPACES}
 

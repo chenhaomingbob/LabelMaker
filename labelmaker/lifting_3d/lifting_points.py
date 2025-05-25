@@ -18,18 +18,35 @@ log = logging.getLogger('3D Point Lifting')
 
 
 def project_pointcloud(points, pose, intrinsics):
+    """将3D点云投影到2D图像平面
+
+    该函数通过给定的相机位姿和相机内参，将3D点云投影到2D图像平面。
+    计算过程包括：将点云转换到相机坐标系，然后应用相机内参进行投影，
+    最后进行归一化处理得到2D坐标。
+
+    Args:
+        points: numpy数组，形状为(N,3)，表示N个3D点的坐标(x,y,z)
+        pose: numpy数组，形状为(4,4)，表示相机在世界坐标系中的位姿(变换矩阵)
+        intrinsics: numpy数组，形状为(3,3)或(3,4)，表示相机内参矩阵
+
+    Returns:
+        numpy数组，形状为(N,3)，表示投影后的2D齐次坐标(x,y,w)，
+        其中w是深度值，x/w和y/w是实际的2D坐标
+    """
+    # 将3D点转换为齐次坐标(N,4)
     points_h = np.hstack((points, np.ones_like(points[:, 0:1])))
+    # 将点从世界坐标系转换到相机坐标系
     points_c = np.linalg.inv(pose) @ points_h.T
     points_c = points_c.T
-
+    # 如果内参矩阵是3x3，则扩展为4x4的齐次形式
     if intrinsics.shape[-1] == 3:
         intrinsics = np.hstack((intrinsics, np.zeros((3, 1))))
         intrinsics = np.vstack((intrinsics, np.zeros((1, 4))))
         intrinsics[-1, -1] = 1.
-
+    # 应用内参矩阵进行投影变换
     points_p = intrinsics @ points_c.T
     points_p = points_p.T[:, :3]
-
+    # 归一化处理，将齐次坐标转换为2D坐标
     points_p[:, 0] /= (points_p[:, -1] + 1.e-6)
     points_p[:, 1] /= (points_p[:, -1] + 1.e-6)
 
@@ -86,7 +103,7 @@ def main(
     files = input_label_dir.glob('*.png')
     files = sorted(files, key=lambda x: int(x.stem.split('.')[0]))
     resize_image = False
-
+    # 把 3d mesh 再投影至 2D image, 再统计所有的
     for idx, file in tqdm(enumerate(files), total=len(files)):
 
         frame_key = file.stem
@@ -96,7 +113,7 @@ def main(
 
         # 加载RGB图像
         image = np.asarray(Image.open(str(input_color_dir /
-                                          f'{frame_key}.jpg'))).astype(np.uint8) #
+                                          f'{frame_key}.jpg'))).astype(np.uint8)  #
         # 加载深度图
         depth = np.asarray(Image.open(str(
             input_depth_dir / f'{frame_key}.png'))).astype(np.float32) / 1000.
@@ -133,8 +150,7 @@ def main(
 
         d = depth[yy[valid_mask], xx[valid_mask]]
 
-        valid_mask[valid_mask] = (zz[valid_mask] > 0) & (np.abs(zz[valid_mask] - d)
-                                                         <= 0.1)
+        valid_mask[valid_mask] = (zz[valid_mask] > 0) & (np.abs(zz[valid_mask] - d) <= 0.1)
 
         labels_2d = labels[yy[valid_mask], xx[valid_mask]]
         labels_3d[valid_mask, labels_2d] += 1
@@ -143,13 +159,19 @@ def main(
     labels_3d = np.argmax(labels_3d, axis=-1)
 
     # save output
-    np.savetxt(str(scene_dir / output_file), labels_3d, fmt='%i')
+    np.savetxt(str(scene_dir / output_file), labels_3d, fmt='%i')  # 保存 3d label
 
     # save colored mesh
     color_map = np.zeros(shape=(maximum_label, 3), dtype=np.uint8)
-    for item in get_wordnet():
+    ############# before ##########
+    # for item in get_wordnet():
+    #     color_map[item['id']] = item['color']
+    ############# before ##########
+    for item in get_wordnet(label_key='occ11_id'):
         color_map[item['id']] = item['color']
-    label_mesh_color = color_map[labels_3d]
+
+
+    label_mesh_color = color_map[labels_3d]  # 根据wordnet的映射来生成mesh color
 
     label_mesh = o3d.geometry.TriangleMesh()
     label_mesh.vertices = mesh.vertices

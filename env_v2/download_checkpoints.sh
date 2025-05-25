@@ -7,6 +7,7 @@ echo $dir_name
 mkdir -p $dir_name/../checkpoints
 
 # ovseg https://drive.google.com/file/d/1cn-ohxgXDrDfkzC1QdO-fi8IjbjXmgKy/view?pli=1
+echo $dir_name/../checkpoints/ovseg_swinbase_vitL14_ft_mpt.pth
 gdown "1cn-ohxgXDrDfkzC1QdO-fi8IjbjXmgKy" -O $dir_name/../checkpoints/ovseg_swinbase_vitL14_ft_mpt.pth
 
 # recognize-anything https://huggingface.co/spaces/xinyu1205/recognize-anything/blob/main/ram_swin_large_14m.pth

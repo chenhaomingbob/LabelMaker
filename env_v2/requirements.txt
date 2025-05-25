@@ -40,3 +40,6 @@ pyquaternion
 
 # internimage
 mmdet==2.26.0
+
+
+transformers==4.30.2
