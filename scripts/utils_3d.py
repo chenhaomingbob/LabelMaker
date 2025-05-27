@@ -70,7 +70,8 @@ def fuse_mesh(
         depth=depth,
         depth_scale=depth_scale,
         depth_trunc=depth_trunc,
-        convert_rgb_to_intensity=False)
+        convert_rgb_to_intensity=False
+    )
 
     tsdf.integrate(
         image=rgbd,

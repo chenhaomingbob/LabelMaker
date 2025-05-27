@@ -72,9 +72,9 @@ def process_arkit(
     trajectory_file = join(scan_dir, 'lowres_wide.traj')
 
     assert exists(color_dir), "vga_wide attribute not downloaded!"
+    assert exists(intrinsic_dir), "vga_wide_intrinsics attribute not downloaded!"
     assert exists(depth_dir), "lowres_depth attribute not downloaded!"
     assert exists(confidence_dir), "confidence attribute not downloaded!"
-    assert exists(intrinsic_dir), "vga_wide_intrinsics attribute not downloaded!"
     assert exists(trajectory_file), "lowres_wide.traj attribute not downloaded!"
 
     color_file_list = os.listdir(color_dir)

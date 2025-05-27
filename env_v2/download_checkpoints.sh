@@ -34,3 +34,6 @@ gdown "1Jrh-bRnJEjyMCS7f-WsaFlccfPjJPPHI" -O $dir_name/../checkpoints/omnidata_d
 
 # omnidata normal model https://drive.google.com/file/d/1wNxVO4vVbDEMEpnAi_jwQObf2MFodcBR/view
 gdown "1wNxVO4vVbDEMEpnAi_jwQObf2MFodcBR&confirm=t" -O $dir_name/../checkpoints/omnidata_dpt_normal_v2.ckpt
+
+# SAN https://github.com/MendelXu/SAN
+wget 'https://huggingface.co/Mendel192/san/resolve/main/san_vit_large_14.pth' -O $dir_name/../checkpoints/san_vit_large_14.pth

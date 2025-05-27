@@ -147,6 +147,10 @@ cd $dir_name/../3rdparty/ov-seg/third_party/CLIP
 python -m pip install -Ue .
 python -m nltk.downloader -d $NLTK_DATA wordnet
 
+
+# install dependency for san
+pip install open_clip_torch==2.16.0
+
 # install internimage
 # # avoid an error when no cuda runtime available
 sed -i 's/torch.cuda.is_available()/True/g' $dir_name/../3rdparty/InternImage/segmentation/ops_dcnv3/setup.py

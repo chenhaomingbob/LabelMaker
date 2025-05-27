@@ -35,3 +35,6 @@
 	path = 3rdparty/sdfstudio
 	url = https://github.com/cvg/sdfstudio.git
 	branch = devel
+[submodule "3rdparty/SAN"]
+	path = 3rdparty/SAN
+	url = https://github.com/MendelXu/SAN

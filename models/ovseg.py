@@ -241,9 +241,7 @@ def get_templates(classes):
 def run(
         scene_dir: Union[str, Path],
         output_folder: Union[str, Path],
-        device: Union[
-            str, torch.
-            device] = 'cuda:0',
+        device: Union[ str, torch.device] = 'cuda:0',
         # changing this to cuda default as all of us have it available. Otherwise, it will fail on machines without cuda
         classes='wn_nodef',
         flip=False,
