@@ -16,11 +16,83 @@ from PIL import Image
 from sklearn.neighbors import KDTree
 import pickle
 from copy import deepcopy
+import math as m
 
 logging.basicConfig(level="INFO")
 log = logging.getLogger('Mesh2Occupancy')
 
 vis_debug = False
+
+import trimesh
+
+
+def voxelize_with_trimesh(mesh, voxel_size=0.05):
+    # 转换为Trimesh对象
+    tri_mesh = trimesh.Trimesh(
+        vertices=np.asarray(mesh.vertices),
+        faces=np.asarray(mesh.triangles)
+    )
+
+    # 水密体素化
+    voxels = tri_mesh.voxelized(
+        pitch=voxel_size,
+        method='subdivide'  # 确保水密性
+    )
+
+    return voxels.matrix, voxels.points  # 体素矩阵和中心坐标
+
+
+def Ry(theta):
+    return np.matrix([[m.cos(theta), 0, m.sin(theta)],
+                      [0, 1, 0],
+                      [-m.sin(theta), 0, m.cos(theta)]])
+
+
+def Rx(t):
+    """Rotation about the x-axis."""
+    c = np.cos(t)
+    s = np.sin(t)
+    return np.array([[1, 0, 0],
+                     [0, c, -s],
+                     [0, s, c]])
+
+
+def transform_ScanNet_to_py3D():
+    rot_tmp1 = Rx(np.deg2rad(-90))
+    rot_tmp2 = Ry(np.deg2rad(-90))
+    rot3 = np.asarray(np.dot(rot_tmp2, rot_tmp1))
+    T = np.eye(4)
+    T[:3, :3] = rot3
+    return T
+
+
+def alignPclMesh(pclMesh, axis_align_matrix=np.eye(4), T=np.eye(4)):
+    if isinstance(pclMesh, o3d.geometry.TriangleMesh):
+        verts = np.array(pclMesh.vertices)
+        newVerts = np.ones((verts.shape[0], 4))
+        newVerts[:, :3] = verts
+        newVerts = newVerts.dot(axis_align_matrix.T)
+        newVerts = newVerts.dot(T.T)
+        pclMesh.vertices = o3d.utility.Vector3dVector(newVerts[:, :3])
+    elif isinstance(pclMesh, o3d.geometry.PointCloud):
+        points = np.array(pclMesh.points)
+        newPoints = np.ones((points.shape[0], 4))
+        newPoints[:, :3] = points
+        newPoints = newPoints.dot(axis_align_matrix.T)
+        newPoints = newPoints.dot(T.T)
+        pclMesh.points = o3d.utility.Vector3dVector(newPoints[:, :3])
+    elif isinstance(pclMesh, np.ndarray):
+        points = pclMesh
+        newPoints = np.ones((points.shape[0], 4))
+        newPoints[:, :3] = points
+        newPoints = newPoints.dot(axis_align_matrix.T)
+        newPoints = newPoints.dot(T.T)
+        return newPoints
+        # pclMesh.points = o3d.utility.Vector3dVector(newPoints[:, :3])
+    else:
+        raise NotImplementedError
+
+    return pclMesh
 
 
 @gin.configurable
@@ -30,12 +102,21 @@ def main(
         input_mesh: Union[str, Path],
         output_global_occupancy: Union[str, Path],
         output_frame_folder: Union[str, Path],
+        cad_object_label: Union[str, Path],
+        original_object_index: Union[str, Path],
+        cad_retrieval_mesh: Union[str, Path],
         label_space='occ11',
-        voxel_size=0.08
+        voxel_size=0.08,
+
 ):
     scene_dir = Path(scene_dir)
     intput_label = Path(input_label)  #
     input_mesh = Path(input_mesh)
+
+    cad_object_label = Path(cad_object_label)
+    original_object_index = Path(original_object_index)
+    cad_retrieval_mesh = Path(cad_retrieval_mesh)
+
     output_global_occupancy = Path(output_global_occupancy)
 
     # check if scene_dir exists
@@ -59,6 +140,15 @@ def main(
 
     input_label_path = scene_dir / intput_label
     assert input_label_path.exists() and input_label_path.is_file()
+    #####
+    cad_object_label_path = scene_dir / cad_object_label
+    assert cad_object_label_path.exists() and cad_object_label_path.is_file()
+
+    original_object_index_path = scene_dir / original_object_index
+    assert original_object_index_path.exists() and original_object_index_path.is_file()
+
+    cad_retrieval_mesh_path = scene_dir / cad_retrieval_mesh
+    assert cad_retrieval_mesh_path.exists() and cad_retrieval_mesh_path.is_file()
 
     output_dir = scene_dir / output_frame_folder
     shutil.rmtree(output_dir, ignore_errors=True)  # remove output_dir if it exists
@@ -73,6 +163,104 @@ def main(
     label_3d = np.loadtxt(str(input_label_path))  # (N,)
 
     assert len(label_3d) == len(vertices)
+    fast_search_classes = ['bed', 'bench', 'chair', 'clock', 'display', 'flowerpot', 'guitar', 'lamp', 'laptop',
+                           'microwaves', 'piano', 'printer', 'sofa', 'stove', 'table', 'trash bin', 'washer']
+    fast_cad2occ = [
+        6,  # 'bed'
+        10,  # 'bench'
+        5,  # 'chair'
+        11,  # 'clock'
+        11,  # 'display'
+        11,  # 'flowerpot'
+        11,  # 'guitar'
+        11,  # 'lamp'
+        11,  # 'laptop
+        11,  # microwaves
+        11,  # piano
+        11,  # printer
+        7,  # sofa
+        11,  # 'stove'
+        8,  # table
+        10,  # 'trash bin
+        10,  # washer
+    ]
+    cad_original_object_index = np.loadtxt(str(original_object_index_path)).astype(int)
+    cad_retrieval_object_label = np.loadtxt(str(cad_object_label_path))
+    cad_retrieval_object_label = np.array(fast_cad2occ)[cad_retrieval_object_label.astype(int)]
+    # cad_retrieval_object_label = fast_cad2occ(cad_retrieval_object_label)
+    cad_retrieval_mesh = o3d.io.read_triangle_mesh(str(cad_retrieval_mesh_path))
+    transform_matrix = np.linalg.inv(transform_ScanNet_to_py3D())
+    cad_retrieval_mesh = alignPclMesh(cad_retrieval_mesh, transform_matrix)
+    # cad_retrieval_vertices = np.asarray(cad_retrieval_mesh.vertices)  # (N,3)
+
+    # 去除物体的扫描部分
+    label_3d = np.delete(label_3d, cad_original_object_index)
+    mesh.remove_vertices_by_index(cad_original_object_index)
+    bg_vertices = np.asarray(mesh.vertices)
+    bg_label_3d = label_3d
+    # 添加物体的CAD模型
+    ##################### CAD模型单独体素化
+    # 1. 先执行CAD模型的水密体素化
+    changes = np.where(cad_retrieval_object_label[:-1] != cad_retrieval_object_label[1:])[0] + 1
+    start_indices = np.concatenate([[0], changes])
+    end_indices = np.concatenate([changes, [len(cad_retrieval_object_label)]])
+
+    vertices = np.asarray(cad_retrieval_mesh.vertices)
+    triangles = np.asarray(cad_retrieval_mesh.triangles)
+    separate_meshes = []
+    for start, end in zip(start_indices, end_indices):
+        # 当前标签块的顶点范围
+        label = cad_retrieval_object_label[start]
+        vertex_indices = np.arange(start, end)
+
+        # 筛选完全属于当前块的三角形
+        mask = np.all(np.isin(triangles, vertex_indices), axis=1)
+        valid_triangles = triangles[mask] - start  # 重映射索引到0-based
+
+        # 创建独立模型
+        mesh_part = o3d.geometry.TriangleMesh()
+        mesh_part.vertices = o3d.utility.Vector3dVector(vertices[start:end])
+        mesh_part.triangles = o3d.utility.Vector3iVector(valid_triangles)
+        separate_meshes.append((label, mesh_part))  # 保存标签和模型
+
+    all_voxels = []
+    all_sem_labels = []
+    for label, mesh in separate_meshes:
+        # 方法二：使用Trimesh（更推荐） 执行水密体素化
+        voxel_matrix, centers = voxelize_with_trimesh(mesh, voxel_size)
+
+        all_voxels.append(centers)  # 存储每个模型的体素
+        all_sem_labels.append(np.array([label] * len(centers)))
+
+    # 合并所有体素
+    combined_voxels = np.vstack(all_voxels)
+    combined_sem_labels = np.concatenate(all_sem_labels)
+
+    # voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+    #     o3d.geometry.PointCloud(o3d.utility.Vector3dVector(combined_voxels)),
+    #     voxel_size=voxel_size
+    # )
+    # voxel_centers = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()]) * voxel_size
+    # cad_pcd = o3d.geometry.PointCloud()
+    # cad_pcd.points = o3d.utility.Vector3dVector(voxel_centers)
+    # o3d.io.write_point_cloud(str(scene_dir / 'CAD_model_points.ply'), cad_pcd)
+    # assert len(voxel_centers) == len(combined_sem_labels)
+    ##################### CAD模型单独体素化
+    # mesh = mesh + cad_retrieval_mesh
+    # label_3d = np.concatenate([label_3d, cad_retrieval_object_label])
+    #
+    # vertices = np.asarray(mesh.vertices)
+    scene_vertices = np.concatenate([bg_vertices, combined_voxels])
+    scene_label_3d = np.concatenate([bg_label_3d, combined_sem_labels])
+
+    assert len(scene_label_3d) == len(scene_vertices)
+    vertices = scene_vertices
+    label_3d = scene_label_3d
+    # debug
+    # tmp = o3d.io.write_triangle_mesh(
+    #     os.path.join("/home/chm/datasets/arkitscenes/labelmaker/47333462", "test.ply"),
+    #     mesh
+    # )
 
     # define color map for visualization
     num_classes = 2000
@@ -93,6 +281,7 @@ def main(
     ##############################
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(vertices)
+    o3d.io.write_point_cloud(str(scene_dir / 'pc.ply'), pcd)
 
     voxel_down_pcd, _, inverse_index_list = pcd.voxel_down_sample_and_trace(
         voxel_size=voxel_size, min_bound=pcd.get_min_bound(), max_bound=pcd.get_max_bound()
@@ -230,7 +419,6 @@ def main(
         mask = dist <= voxel_size  # 确保最近的邻居，在范围之内
         gridPtsLabel[mask] = frame_voxels_sem[ind[mask]]  # 赋予语义标签
 
-
         g = gridPtsLabel.reshape(voxDim[0], voxDim[1], voxDim[2])
         g_not_0 = np.where(g > 0)  # 初始化是0
         if len(g_not_0) == 0:
@@ -342,17 +530,39 @@ def arg_parser():
         type=str,
         default='labels.txt',
         help='Name of input label for 3d mesh',
-    ) # 每个点的label
+    )  # 每个点的label
     parser.add_argument(
         '--output_global_occupancy',
         type=str,
         default='occupancy.ply',
         help='Name of files to save the occupancy',
     )
+
     parser.add_argument(
         '--label_space',
         default='occ11'
     )  # ['wordnet','occ11']
+
+    ############### 添加cad
+    parser.add_argument(
+        '--cad_object_label_file',
+        type=str,
+        default='intermediate/HOC_Search/CAD_retrieval/cad_object_label.txt',
+        help='Name of input label for 3d mesh',
+    )
+    parser.add_argument(
+        '--original_object_index_file',
+        type=str,
+        default='intermediate/HOC_Search/CAD_retrieval/original_object_index.txt',
+        help='Name of input label for 3d mesh',
+    )
+    parser.add_argument(
+        '--cad_retrieval_mesh',
+        type=str,
+        default='intermediate/HOC_Search/CAD_retrieval/cad_retrieval.ply',
+        help='Name of input label for 3d mesh',
+    )  #
+    ###############
 
     parser.add_argument(
         '--output_frame_folder',
@@ -382,4 +592,7 @@ if __name__ == '__main__':
         output_global_occupancy=args.output_global_occupancy,
         output_frame_folder=args.output_frame_folder,
         label_space=args.label_space,
+        cad_object_label=args.cad_object_label_file,
+        original_object_index=args.original_object_index_file,
+        cad_retrieval_mesh=args.cad_retrieval_mesh,
     )

@@ -1394,35 +1394,6 @@ def get_wordnet_by_occurance():
     return data
 
 
-# def get_wordnet(label_key='wn199-merged-v2', output_key='wn199-merged-v2'):
-#     """
-#
-#     Args:
-#         label_key: 索引的
-#         output_key:  输出 ‘name’和‘color’对应的栏
-#
-#     Returns:
-#
-#     """
-#     table = pd.read_csv(
-#         Path(os.path.dirname(os.path.realpath(__file__))) / '..' /
-#         'labelmaker/mappings/label_mapping_occ11.csv')
-#     ids_found = []
-#     data = [{'id': 0, 'name': 'unknown', 'color': [0, 0, 0]}]
-#     for row in table.index:
-#         if table[label_key].isnull()[row]:
-#             continue
-#         if table.loc[row, label_key] in ids_found:
-#             continue
-#         ids_found.append(table.loc[row, label_key])
-#         data.append({
-#             'id': int(table.loc[row, label_key]),
-#             'name': table.loc[row, 'wnsynsetkey' if output_key != 'occ11_id' else 'occ11'],
-#             'color': [int(x) for x in table.loc[row, 'color' if output_key != 'occ11_id' else 'occ11_color'].split('-')]
-#         })
-#     return data
-
-
 def get_wordnet(label_key='wn199-merged-v2'):
     table = pd.read_csv(
         Path(os.path.dirname(os.path.realpath(__file__))) / '..' /

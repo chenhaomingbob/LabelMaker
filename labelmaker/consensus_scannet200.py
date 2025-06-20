@@ -20,8 +20,8 @@ log = logging.getLogger('Segmentation Consensus')
 
 class PredictorVoting:
 
-    def __init__(self, output_space='wn199-merged-v2'):
-        # assert output_space == 'wn199'
+    def __init__(self, output_space='id'):
+        assert output_space == 'id' # scannet200
         matcher_ade150 = LabelMatcher('ade20k', output_space)
         matcher_nyu40 = LabelMatcher('nyu40id', output_space)
         matcher_wn199 = LabelMatcher('wn199', output_space)  # wordnet
@@ -123,7 +123,7 @@ VALID_LABEL_SPACES = ['ade20k', 'nyu40', 'scannet200', 'wordnet', 'scannet']
 
 
 def consensus(k, folders, output_dir, min_votes):
-    votebox = PredictorVoting(output_space='wn199-merged-v2')
+    votebox = PredictorVoting(output_space='id')
 
     predictions = {label_space: [] for label_space in VALID_LABEL_SPACES}
 
@@ -212,7 +212,7 @@ def arg_parser():
     parser.add_argument(
         '--output',
         type=str,
-        default='intermediate/consensus_wn199',
+        default='intermediate/consensus_scannet200',
         help=
         'Name of output directory in the workspace directory intermediate. Has to follow the pattern $labelspace_$model_$version',
     )
