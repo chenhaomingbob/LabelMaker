@@ -18,6 +18,9 @@ sys.path.append(abspath(join(dirname(__file__), '..')))
 from utils_3d import fuse_mesh
 
 
+
+# 废弃了
+
 def get_closest_timestamp(reference_timestamps: np.ndarray,
                           target_timestamps: np.ndarray):
     """
