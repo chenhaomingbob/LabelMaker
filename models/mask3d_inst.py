@@ -29,6 +29,7 @@ from torch.nn.functional import softmax
 from tqdm import tqdm
 
 from labelmaker.label_data import get_ade150
+from PIL import Image
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger('Mask 3D Mesh preprocessing')
@@ -512,7 +513,7 @@ def run_rendering(
                         mask,
                         segmentation == overlapping_id)] = len(pixelid_to_instance) - 1
 
-        semantic_segmentation = np.zeros(resolution).astype(np.uint16)
+        semantic_segmentation = np.zeros(resolution).astype(np.uint16) #
         for i, ids in enumerate(pixelid_to_instance):
             if len(ids) == 1:
                 semantic_segmentation[segmentation == i] = instances[ids[0]][1]
@@ -536,12 +537,17 @@ def run(
         render_resolution=(480, 640),
         flip: bool = False,
 ):
+    color_path = join(scene_dir, 'color', '000000.jpg')
+    with Image.open(color_path) as img:
+        render_resolution = (img.height,img.width)
+
     run_mask3d(
         scene_dir=scene_dir,
         output_folder=output_folder,
         device=device,
         flip=flip,
     )
+
     run_rendering(
         scene_dir=scene_dir,
         output_folder=output_folder,

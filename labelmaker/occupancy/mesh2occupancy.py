@@ -162,7 +162,7 @@ def main(
 
         # 缩放深度图
         h, w, _ = image.shape
-        depth = cv2.resize(depth, (w, h))
+        depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST)
 
         # 加载相机位姿
         pose_file = input_pose_dir / f'{frame_key}.txt'
@@ -229,7 +229,6 @@ def main(
         dist, ind = dist.reshape(-1), ind.reshape(-1)
         mask = dist <= voxel_size  # 确保最近的邻居，在范围之内
         gridPtsLabel[mask] = frame_voxels_sem[ind[mask]]  # 赋予语义标签
-
 
         g = gridPtsLabel.reshape(voxDim[0], voxDim[1], voxDim[2])
         g_not_0 = np.where(g > 0)  # 初始化是0
@@ -302,7 +301,82 @@ def main(
             frame_pcd4.colors = o3d.utility.Vector3dVector(color_map[unknown_sem_frame_voxels[:, -1].astype(int)] / 255)
             o3d.io.write_point_cloud(str(output_dir / f'{frame_key}_unknown_sem.ply'), frame_pcd4)
         #######
-        # TODO 根据条件过滤一些体素
+
+        # ===================================================================
+        # 2025-06-26
+        # <<< 可见性过滤 >>>
+        # ===================================================================
+        # 在这里，`final_labeled_voxels` 包含了当前帧附近的所有体素及其初步标签 (0=empty, 1-12=sem, 255=unknown)
+        # 我们现在要基于深度图，把被遮挡的体素找出来，并把它们的标签设为0 (empty)
+
+        # 1. 获取所有体素点的世界坐标和当前标签
+        voxel_coords = frame_voxels[:, :3]
+        voxel_labels = frame_voxels[:, -1]
+
+        # 2. 将所有体素点转换到相机坐标系
+        world2cam = np.linalg.inv(cam2world)
+        voxels_cam = (world2cam[:3, :3] @ voxel_coords.T + world2cam[:3, -1:]).T
+
+        # 3. 投影到像素平面
+        voxels_pix = (intrinsics[:3, :3] @ voxels_cam.T).T
+
+        depths_in_cam = voxels_cam[:, 2]
+        # 防止除以零
+        depths_in_cam[depths_in_cam <= 0] = 1e6  # 把相机后方的点深度设为极大值，使其在后续比较中被自然剔除
+
+        us = (voxels_pix[:, 0] / depths_in_cam).astype(int)
+        vs = (voxels_pix[:, 1] / depths_in_cam).astype(int)
+
+        # 4. 创建一个遮挡掩码，初始假设所有点都未被遮挡
+        # 我们只关心那些有标签的体素（非empty, 非unknown）
+        occlusion_mask = np.zeros_like(voxel_labels, dtype=bool)
+
+        # 5. 筛选出需要进行深度测试的体素
+        # 条件：a. 在图像范围内 b. 在相机前方 c. 有一个有效的语义标签 (不是empty也不是unknown)
+        test_indices = np.where(
+            (us >= 0) & (us < w) &
+            (vs >= 0) & (vs < h) &
+            (depths_in_cam > 0) &
+            (voxel_labels > 0) & (voxel_labels != 255)
+        )[0]
+
+        if len(test_indices) > 0:
+            # 获取这些待测点的像素坐标和计算深度
+            test_us = us[test_indices]
+            test_vs = vs[test_indices]
+            test_depths = depths_in_cam[test_indices]
+
+            # 获取深度图中对应位置的深度值
+            gt_depth_values = depth[test_vs, test_us]
+
+            # 识别被遮挡的点：其计算深度显著大于GT深度
+            is_occluded = test_depths > (gt_depth_values + voxel_size * 5)
+
+            # 将被遮挡的点的索引更新到遮挡掩码中
+            occluded_indices = test_indices[is_occluded]
+            occlusion_mask[occluded_indices] = True
+
+        # 6. 应用遮挡掩码：将被遮挡的体素标签设为0 (empty)
+        final_labels = voxel_labels.copy()
+        final_labels[occlusion_mask] = 0
+        frame_voxels[:, -1] = final_labels
+
+        # [Debug Visualization - 可选]
+        if vis_debug:
+            # 可视化过滤后的结果
+            visible_voxels = np.hstack((gridPtsWorld, final_labels.reshape(-1, 1)))
+            visible_voxels = visible_voxels[np.logical_and(visible_voxels[:, -1] > 0, visible_voxels[:, -1] < 13)]
+
+            if len(visible_voxels) > 0:
+                frame_pcd_filtered = o3d.geometry.PointCloud()
+                frame_pcd_filtered.points = o3d.utility.Vector3dVector(visible_voxels[:, :3])
+                frame_pcd_filtered.colors = o3d.utility.Vector3dVector(
+                    color_map[visible_voxels[:, -1].astype(int)] / 255)
+                o3d.io.write_point_cloud(str(output_dir / f'{frame_key}_final_visible.ply'), frame_pcd_filtered)
+
+        # ===================================================================
+        # <<<  新的最终可见性过滤 >>>
+        # ===================================================================
 
         ###### 保存
         target_1_4 = frame_voxels[:, -1].reshape(60, 60, 36)
@@ -312,7 +386,7 @@ def main(
             'depth_gt': str(input_depth_dir / f'{frame_key}.png'),
             'cam_pose': pose,  # camera to world
             'intrinsic': intrinsics,
-            'target_1_4': target_1_4,
+            'target_1_4': target_1_4,  # 1_4 表示下采样了4倍, 8cm
             'voxel_origin': np.array([frame_voxels[:, 0].min(), frame_voxels[:, 1].min(), frame_voxels[:, 2].min()]),
         }
         with open(str(output_dir / f'{frame_key}.pkl'), "wb") as handle:
@@ -342,7 +416,7 @@ def arg_parser():
         type=str,
         default='labels.txt',
         help='Name of input label for 3d mesh',
-    ) # 每个点的label
+    )  # 每个点的label
     parser.add_argument(
         '--output_global_occupancy',
         type=str,

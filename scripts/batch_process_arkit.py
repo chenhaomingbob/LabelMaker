@@ -45,7 +45,7 @@ def process_single_scan(scan_dir, target_base_dir, args_dict):
 
     cmd = [
         'python',
-        join(SCRIPT_DIR, 'arkitscenes2labelmaker_v2.py'),
+        join(SCRIPT_DIR, 'arkitscenes2labelmaker.py'),
         '--scan_dir', scan_dir,
         '--target_dir', target_dir,
         '--sdf_trunc', str(args_dict['sdf_trunc']),
@@ -65,8 +65,11 @@ def process_single_scan(scan_dir, target_base_dir, args_dict):
         text=True
     )
 
+    print("stdout", result.stdout)
+    print("stderr", result.stderr)
     return {
         'name': scan_name,
+        'status': 'completed',
         'stdout': result.stdout,
         'stderr': result.stderr
     }

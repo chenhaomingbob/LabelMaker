@@ -25,3 +25,41 @@ python -m labelmaker.lifting_3d.lifting_points --workspace /home/chm/datasets/ar
 python labelmaker/consensus_scannet200.py --workspace /home/chm/datasets/arkitscenes/labelmaker/47333462
 # 3D Lifting scannet200
 python -m labelmaker.lifting_3d.lifting_points --workspace /home/chm/datasets/arkitscenes/labelmaker/47333462 --output_mesh point_lifted_mesh_scannet200.ply --label_folder intermediate/consensus_scannet200
+
+
+语义标注的时间
+- 一个116张图片的场景，做完语义标注需要24分钟
+
+
+# 自动化标注的流程
+
+1. 将原始数据转换成LabelMaker的格式
+2. 语义标注
+3. CAD标注检索
+4. 生成Occupancy真值
+
+
+## 语义标注
+### 标注单个场景
+bash ./scripts/semantic.sh
+
+### 标注多个场景
+bash scripts/semantic.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data
+bash scripts/semantic.sh /data1/chm/datasets/arkitscenes/LabelMaker/Training
+
+## CAD标注检索
+TODO
+
+## 3D Lifting
+bash scripts/point_3d.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data
+bash scripts/point_3d.sh /data1/chm/datasets/arkitscenes/LabelMaker/Training
+
+## 数据传输
+rsync -avzL --progress --exclude='intermediate' chm@49.52.10.241:/data1/chm/datasets/arkitscenes/LabelMaker/mini_data/ .
+
+
+
+
+# 数据的存储位置
+ECNU 62 - /home/chm/workspaces/chm_data/datasets/arkitscenes/LabelMaker
+ECNU 241 - /data1/chm/datasets/arkitscenes/LabelMaker

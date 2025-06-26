@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 import sys
-from os.path import abspath, dirname, exists, join
+from os.path import abspath, dirname, exists, join, basename
 
 import cv2
 import gin
@@ -13,6 +13,7 @@ from PIL import Image
 from scipy.interpolate import CubicSpline
 from scipy.spatial.transform import Rotation, RotationSpline
 from tqdm import trange
+import pandas as pd
 
 sys.path.append(abspath(join(dirname(__file__), '..')))
 from utils_3d import fuse_mesh
@@ -44,6 +45,75 @@ def load_intrinsics(file):
     return np.asarray([[fx, 0, hw], [0, fy, hh], [0, 0, 1]])
 
 
+def rotate_image(img, direction):
+    if direction == 'Up':
+        pass
+    elif direction == 'Left':
+        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    elif direction == 'Right':
+        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    elif direction == 'Down':
+        img = cv2.rotate(img, cv2.ROTATE_180)
+    else:
+        raise Exception(f'No such direction (={direction}) rotation')
+    return img
+
+
+def adjust_pose(pose_matrix, rotation_direction):
+    """根据旋转方向调整位姿矩阵"""
+    if rotation_direction == 'Left':  # 顺时针旋转图像 -> 相机坐标系逆时针转
+        rot = np.array([[0, 1, 0],
+                        [-1, 0, 0],
+                        [0, 0, 1]])
+    elif rotation_direction == 'Right':  # 逆时针旋转图像
+        rot = np.array([[0, -1, 0],
+                        [1, 0, 0],
+                        [0, 0, 1]])
+    elif rotation_direction == 'Down':
+        rot = np.array([[-1, 0, 0],
+                        [0, -1, 0],
+                        [0, 0, 1]])
+    else:  # 'Up'
+        return pose_matrix.copy()
+
+    # 修正: 应用旋转到位姿的旋转部分，必须是后乘（右乘）
+    # 这会旋转相机自身的局部坐标系
+    adjusted_pose = pose_matrix.copy()
+    adjusted_pose[:3, :3] = adjusted_pose[:3, :3] @ rot
+    return adjusted_pose
+
+
+def adjust_intrinsic(intrinsic_matrix, rotation_direction, H, W):
+    """根据旋转方向调整内参矩阵"""
+    fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
+    cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2]
+
+    if rotation_direction == 'Left':  # 顺时针90度
+        # 修正: 新主点 (c'_x, c'_y) 应该是 (H - cy, cx)
+        new_intrinsic = np.array([
+            [fy, 0, H - cy],
+            [0, fx, cx],
+            [0, 0, 1]
+        ])
+    elif rotation_direction == 'Right':  # 逆时针90度
+        # 修正: 新主点 (c'_x, c'_y) 应该是 (cy, W - cx)
+        new_intrinsic = np.array([
+            [fy, 0, cy],
+            [0, fx, W - cx],
+            [0, 0, 1]
+        ])
+    elif rotation_direction == 'Down':  # 180度
+        new_intrinsic = np.array([
+            [fx, 0, W - cx],
+            [0, fy, H - cy],
+            [0, 0, 1]
+        ])
+    else:  # 'Up'或不旋转
+        return intrinsic_matrix.copy()
+
+    return new_intrinsic
+
+
 @gin.configurable
 def process_arkit(
         scan_dir: str,
@@ -71,11 +141,19 @@ def process_arkit(
 
     trajectory_file = join(scan_dir, 'lowres_wide.traj')
 
+    meta_data_csv_file = join(os.path.join(scan_dir, "../.."), 'metadata.csv')
     assert exists(color_dir), "vga_wide attribute not downloaded!"
     assert exists(intrinsic_dir), "vga_wide_intrinsics attribute not downloaded!"
     assert exists(depth_dir), "lowres_depth attribute not downloaded!"
     assert exists(confidence_dir), "confidence attribute not downloaded!"
     assert exists(trajectory_file), "lowres_wide.traj attribute not downloaded!"
+    assert exists(meta_data_csv_file), "metadata.csv  not downloaded!"
+
+    video_id = int(basename(scan_dir))
+    meta_data = pd.read_csv(meta_data_csv_file)
+    sky_direction = meta_data.loc[meta_data['video_id'] == video_id, 'sky_direction'].values[0]
+    if sky_direction == 'Down':
+        sky_direction = 'Up'
 
     color_file_list = os.listdir(color_dir)
     depth_file_list = os.listdir(depth_dir)
@@ -128,7 +206,7 @@ def process_arkit(
             "Found multiple color timestamps matching in timestamps: {}".format(
                 color_ts[depth_margin < margin_threshold].tolist()))
 
-    confidence_dt, confidence_idx, confidence_margin = get_closest_timestamp( color_ts, confidence_ts)
+    confidence_dt, confidence_idx, confidence_margin = get_closest_timestamp(color_ts, confidence_ts)
     if confidence_margin.min() < margin_threshold:
         logger.warn(
             "Found multiple confidence timestamps matching in timestamps: {}".
@@ -185,6 +263,7 @@ def process_arkit(
 
     # get correspondence to original file
     rows = []
+    # num_frame = 100  # for debug
     for i in range(num_frame):
         frame_id = '{:06d}'.format(i)
         color_pth = color_file_list[color_inv[color_idx[timestamp_filter][i]]]
@@ -215,34 +294,46 @@ def process_arkit(
         join(target_dir, 'correspondence.json')))
 
     logger.info("Transfering files...")
+    print("Sky Direction", sky_direction)
     for idx in trange(num_frame):
         frame_id, color_pth, depth_pth, confdc_pth, intr_pth = rows[idx]
-
         # save color
         tgt_color_pth = join(target_dir, 'color',
                              frame_id + '.jpg')  # png -> jpg, compressed
         color_img = Image.open(join(color_dir, color_pth))
+
+        o_h, o_w, _ = np.asarray(color_img).shape
+        color_img = rotate_image(np.asarray(color_img), sky_direction)
+        color_img = Image.fromarray(color_img)
+
         color_img.save(tgt_color_pth)
         h, w, _ = np.asarray(color_img).shape
 
         # save pose
         tgt_pose_pth = join(target_dir, 'pose', frame_id + '.txt')
-        np.savetxt(tgt_pose_pth, pose_mat[idx])
+        pose = pose_mat[idx]
+        pose = adjust_pose(pose, sky_direction)
+        np.savetxt(tgt_pose_pth, pose)  #
 
         # process and save intr
         tgt_intrinsic_pth = join(target_dir, 'intrinsic', frame_id + '.txt')
-        np.savetxt(tgt_intrinsic_pth, load_intrinsics(join(intrinsic_dir,
-                                                           intr_pth)))
+        intrinsic = load_intrinsics(join(intrinsic_dir, intr_pth))
+        intrinsic = adjust_intrinsic(intrinsic, sky_direction, o_h, o_w)
+        np.savetxt(tgt_intrinsic_pth, intrinsic)
 
         # process and save depth
         depth = cv2.imread(join(depth_dir, depth_pth), cv2.IMREAD_UNCHANGED)
         confdc = cv2.imread(join(confidence_dir, confdc_pth), cv2.IMREAD_UNCHANGED)
-
         depth[confdc < 2] = 0
+        depth = rotate_image(depth, sky_direction)
         depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST)
 
         tgt_depth_pth = join(target_dir, 'depth', frame_id + '.png')
         cv2.imwrite(tgt_depth_pth, depth)
+        ##### debug
+        # if idx == num_frame - 1:
+        #     pcd = reproject_to_3d(tgt_color_pth, tgt_depth_pth, intrinsic, pose, depth_scale=1000)
+        #     o3d.io.write_point_cloud(join(target_dir, "output.ply"), pcd)
 
     logger.info("File transfer finished!")
 
@@ -256,6 +347,86 @@ def process_arkit(
     )  # depth_scale is a fixed value in ARKitScene, no need to pass an argument in cli
     logger.info("Fusion finished! Saving to file as {}".format(
         join(target_dir, 'mesh.ply')))
+
+    ################################################################################
+    frame_interval = 15  # 每15帧选1帧
+    logger.info(f"Selecting 1 frame every {frame_interval} frames...")
+
+    # 获取所有帧的文件列表
+    color_files = sorted(os.listdir(join(target_dir, 'color')))
+
+    # 筛选要保留的帧索引
+    keep_indices = range(0, len(color_files), frame_interval)
+
+    # 删除未被选中的帧
+    for i in range(len(color_files)):
+        if i not in keep_indices:
+            frame_id = f"{i:06d}"
+            os.remove(join(target_dir, 'color', f"{frame_id}.jpg"))
+            os.remove(join(target_dir, 'depth', f"{frame_id}.png"))
+            os.remove(join(target_dir, 'pose', f"{frame_id}.txt"))
+            os.remove(join(target_dir, 'intrinsic', f"{frame_id}.txt"))
+    logger.info("Frame sampling finished")
+
+
+def reproject_to_3d(rgb_path, depth_path, intrinsics, pose_mat, depth_scale=1.0, depth_trunc=3.0):
+    import open3d as o3d
+    """
+    将RGB图像反投影到3D空间
+
+    参数:
+        rgb_path: RGB图像路径
+        depth_path: 深度图像路径
+        intrinsics: 相机内参矩阵 (3x3)
+        depth_scale: 深度比例因子 (深度值 = 像素值 / depth_scale)
+        depth_trunc: 最大有效深度值 (米)
+
+    返回:
+        Open3D点云对象
+    """
+    # 加载图像
+    color = np.array(Image.open(rgb_path).convert('RGB'))
+    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+
+    # 处理深度数据
+    if depth_scale > 0:
+        depth = depth / depth_scale  # 转换为米单位
+
+    # 有效深度范围截断
+    depth[depth > depth_trunc] = 0
+
+    # 获取图像尺寸
+    height, width = depth.shape
+
+    # 创建像素坐标网格
+    u, v = np.meshgrid(np.arange(width), np.arange(height))
+
+    # 归一化相机坐标
+    x = (u - intrinsics[0, 2]) * depth / intrinsics[0, 0]
+    y = (v - intrinsics[1, 2]) * depth / intrinsics[1, 1]
+    z = depth
+
+    # 过滤无效点
+    valid = z > 0
+    colors = color[valid]
+
+    # 创建齐次坐标点
+    points_homo = np.vstack((
+        x[valid].ravel(),
+        y[valid].ravel(),
+        z[valid].ravel(),
+        np.ones_like(x[valid].ravel())
+    ))
+
+    # 应用相机位姿变换
+    world_points = (pose_mat @ points_homo)[:-1]  # 移除齐次坐标维度
+
+    # 创建点云对象
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(world_points.T)
+    pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
+
+    return pcd
 
 
 def arg_parser():
