@@ -58,6 +58,16 @@ for workspace in "$PARENT_DIR"/*/; do
         continue # 跳过
     fi
 
+
+
+    # 检查当前 workspace 是否存在 intermediate 文件夹
+    intermediate_dir="$workspace/intermediate"
+    if [ ! -d "$intermediate_dir" ]; then
+        echo "[WARNING] 未找到 'intermediate' 文件夹，跳过当前工作区: $workspace"
+        echo ""
+        continue # 如果文件夹不存在，则跳过本次循环，处理下一个工作区
+    fi
+
     # --- 修改：增加处理进度 ---
     ((processed_count++))
     workspace_start_time=$SECONDS

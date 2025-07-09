@@ -16,6 +16,7 @@ from PIL import Image
 from sklearn.neighbors import KDTree
 import pickle
 from copy import deepcopy
+from collections import Counter
 
 logging.basicConfig(level="INFO")
 log = logging.getLogger('Mesh2Occupancy')
@@ -139,7 +140,7 @@ def main(
     voxOriginCam = np.asarray([
         [0], [0], [1.44]]
     )
-
+    bad_scenes = []
     files = input_color_dir.glob('*.jpg')
     files = sorted(files, key=lambda x: int(x.stem.split('.')[0]))
     for idx, file in tqdm(enumerate(files), total=len(files)):
@@ -304,7 +305,7 @@ def main(
 
         # ===================================================================
         # 2025-06-26
-        # <<< 可见性过滤 >>>
+        # Start <<< 可见性过滤 >>>
         # ===================================================================
         # 在这里，`final_labeled_voxels` 包含了当前帧附近的所有体素及其初步标签 (0=empty, 1-12=sem, 255=unknown)
         # 我们现在要基于深度图，把被遮挡的体素找出来，并把它们的标签设为0 (empty)
@@ -375,7 +376,42 @@ def main(
                 o3d.io.write_point_cloud(str(output_dir / f'{frame_key}_final_visible.ply'), frame_pcd_filtered)
 
         # ===================================================================
-        # <<<  新的最终可见性过滤 >>>
+        # End <<<  最终可见性过滤 >>>
+        # ===================================================================
+        #
+
+        # ===================================================================
+        # 2025-06-26
+        # Start <<< 好坏体素检验 >>>
+        # ===================================================================
+        cnt = Counter(final_labels)
+        total = 0
+        valid = 0
+        for i in cnt.keys():
+            total += cnt[i]
+            if i != 0.0 and i != 255.0:
+                valid += 1
+        outroom = cnt[255.0]
+        empty = cnt[0.0]
+
+        if valid < 2:
+            bad_scenes.append(frame_key)
+            continue
+
+        if (outroom / total) > 0.95:
+            bad_scenes.append(frame_key)
+            continue
+
+        if (empty / total) > 0.95:
+            bad_scenes.append(frame_key)
+            continue
+
+        if ((empty + outroom) / total) > 0.995:
+            bad_scenes.append(frame_key)
+            continue
+        # ===================================================================
+        # 2025-06-26
+        # End <<<  好坏体素检验 >>>
         # ===================================================================
 
         ###### 保存
@@ -391,6 +427,8 @@ def main(
         }
         with open(str(output_dir / f'{frame_key}.pkl'), "wb") as handle:
             pickle.dump(pkl_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print("bad scenes:", bad_scenes)
 
 
 def arg_parser():

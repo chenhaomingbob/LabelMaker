@@ -17,6 +17,7 @@ import pandas as pd
 
 sys.path.append(abspath(join(dirname(__file__), '..')))
 from utils_3d import fuse_mesh
+from collections import Counter
 
 
 def get_closest_timestamp(reference_timestamps: np.ndarray,
@@ -141,7 +142,7 @@ def process_arkit(
 
     trajectory_file = join(scan_dir, 'lowres_wide.traj')
 
-    meta_data_csv_file = join(os.path.join(scan_dir, "../.."), 'metadata.csv')
+    meta_data_csv_file = join(os.path.join(scan_dir, "../.."), 'metadata_updated.csv')
     assert exists(color_dir), "vga_wide attribute not downloaded!"
     assert exists(intrinsic_dir), "vga_wide_intrinsics attribute not downloaded!"
     assert exists(depth_dir), "lowres_depth attribute not downloaded!"
@@ -152,8 +153,35 @@ def process_arkit(
     video_id = int(basename(scan_dir))
     meta_data = pd.read_csv(meta_data_csv_file)
     sky_direction = meta_data.loc[meta_data['video_id'] == video_id, 'sky_direction'].values[0]
-    if sky_direction == 'Down':
-        sky_direction = 'Up'
+    cal_sky_direction = meta_data.loc[meta_data['video_id'] == video_id, 'cal_sky_direction'].values[0]
+
+    if pd.isna(cal_sky_direction):
+        if sky_direction == 'Down':
+            sky_direction = 'Up'
+    else:
+        if cal_sky_direction == 'Up':
+            # 需要确保最终的sky_direction是UP
+            return
+        else:
+            print(
+                f"Sky direction {sky_direction} does not match calibration direction {cal_sky_direction}, "
+                f"start process scan {video_id}")
+
+            name_2_rotation = {
+                "Down": 180,
+                "Left": 90,
+                "Right": 270,
+                "Up": 0,
+            }
+            rotation_2_name = {v: k for k, v in name_2_rotation.items()}
+            if sky_direction == 'Down':
+                # 弥补之前的历史问题。 ''
+                rotation_deg = name_2_rotation[cal_sky_direction]
+            else:
+                #
+                rotation_deg = name_2_rotation[sky_direction] + name_2_rotation[cal_sky_direction]
+            rotation_deg = rotation_deg % 360
+            sky_direction = rotation_2_name[rotation_deg]
 
     color_file_list = os.listdir(color_dir)
     depth_file_list = os.listdir(depth_dir)
@@ -261,6 +289,28 @@ def process_arkit(
     pose_mat = np.linalg.inv(extrinsics_mat)
     logger.info("Pose interpolation finished!")
 
+    # 2025-07-08
+    # get the angle of z direction with upper direction of image
+    zs_in_camera_view = extrinsics_mat[:, :3, 2]  # shape (n, 3)
+    angles_to_image_up = np.arctan2(
+        -zs_in_camera_view[:, 0],
+        -zs_in_camera_view[:, 1],
+    )
+    # 0: up, 1: left, 2: down, 3: right
+    z_directions = np.floor(angles_to_image_up * 2 / np.pi + 8.5).astype(int) % 4
+    z_directions_list = z_directions.tolist()
+    counter = Counter(z_directions_list)
+    most_common_number, count = counter.most_common(1)[0]
+
+    if most_common_number == 0:
+        sky_direction = 'Up'
+    elif most_common_number == 1:
+        sky_direction = 'Left'
+    elif most_common_number == 2:
+        sky_direction = 'Down'
+    elif most_common_number == 3:
+        sky_direction = 'Right'
+
     # get correspondence to original file
     rows = []
     # num_frame = 100  # for debug
@@ -297,7 +347,7 @@ def process_arkit(
     print("Sky Direction", sky_direction)
     for idx in trange(num_frame):
         frame_id, color_pth, depth_pth, confdc_pth, intr_pth = rows[idx]
-        # save color
+
         tgt_color_pth = join(target_dir, 'color',
                              frame_id + '.jpg')  # png -> jpg, compressed
         color_img = Image.open(join(color_dir, color_pth))

@@ -104,7 +104,9 @@ def main():
         all_scans = all_scans[:args.max_scans]
 
     print(f"准备处理 {len(all_scans)} 个扫描...")
-    print(all_scans)
+    print("待处理的扫描目录列表：")
+    for scan in all_scans:
+        print(scan)
     # 准备参数
     args_dict = {
         'sdf_trunc': args.sdf_trunc,

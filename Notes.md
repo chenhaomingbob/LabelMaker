@@ -1,4 +1,10 @@
-1. 先将原始数据转换到LabelMaker的格式
+
+# 批量脚本
+python scripts/batch_process_arkit.py  --scan_base_dir /data1/chm/datasets/arkitscenes/raw/Training/  --target_base_dir /data1/chm/datasets/arkitscenes/LabelMaker/Training   --max_scans 600   --verbose
+
+
+
+2. 先将原始数据转换到LabelMaker的格式
 根据scrips下面的脚本
 - 过滤一下图片的个数
 2.生成2D语义图 （有GT语义的话，可以跳过）
@@ -47,19 +53,40 @@ bash ./scripts/semantic.sh
 bash scripts/semantic.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data
 bash scripts/semantic.sh /data1/chm/datasets/arkitscenes/LabelMaker/Training
 
+bash scripts/semantic_batch.sh /data1/chm/datasets/arkitscenes/LabelMaker/Training
+
+bash scripts/semantic_batch.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v3
+
 ## CAD标注检索
 TODO
 
 ## 3D Lifting
 bash scripts/point_3d.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data
 bash scripts/point_3d.sh /data1/chm/datasets/arkitscenes/LabelMaker/Training
+bash scripts/point_3d.sh /data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v3
 
-## 数据传输
+## 不同服务器之间数据同步
 rsync -avzL --progress --exclude='intermediate' chm@49.52.10.241:/data1/chm/datasets/arkitscenes/LabelMaker/mini_data/ .
+rsync -avzL --progress --exclude='intermediate' chm@49.52.10.241:/data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v2 .
+rsync -avzL --progress --exclude='intermediate' --exclude='point_lifted_mesh.ply' --exclude='mesh.ply' chm@49.52.10.241:/data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v3 .
 
+rsync -avzL --progress --exclude='intermediate' chm@10.1.200.4:/data1/share/NYU_dataset .
+rsync -avzL --progress --exclude='mnt' chm@10.1.200.4:/data1/share/occscannet .
+
+## 数据迁移脚本
+
+## 列出已经处理好的场景
+python find_valid_parent_folders.py
 
 
 
 # 数据的存储位置
 ECNU 62 - /home/chm/workspaces/chm_data/datasets/arkitscenes/LabelMaker
 ECNU 241 - /data1/chm/datasets/arkitscenes/LabelMaker
+
+
+python scripts/batch_process_arkit.py --scan_base_dir /data1/chm/datasets/arkitscenes/raw/Training --target_base_dir /data1/chm/datasets/arkitscenes/LabelMaker/Training --verbose
+
+
+# 数据移动
+bash move_processed_raw_data.sh

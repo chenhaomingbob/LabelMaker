@@ -8,6 +8,12 @@ from scipy.spatial.transform import Rotation as R
 from numba import njit
 from pathlib import Path
 
+# --- 新增的导入 ---
+import cv2
+from scipy.spatial import ConvexHull
+
+
+# --- 导入结束 ---
 
 # base_footprint -> laser
 # base_footprint -> camera_link -> camera_depth_frame -> camera_color_frame
@@ -47,6 +53,21 @@ color_camera_intrinsic_info = np.array(
     ]
 )
 
+# depth_camera_intrinsic_info = np.array(
+#     [
+#         [586.186035, 0.0, 324.702427],
+#         [0.0, 590.631409, 246.167765],
+#         [0.0, 0.0, 1.0]
+#     ]
+# )
+# color_camera_intrinsic_info = np.array(
+#     [
+#         [591.88599, 0.0, 315.96148],
+#         [0.0, 603.39893, 205.72873],
+#         [0.0, 0.0, 1.0]
+#     ]
+# )
+
 # depth frame to color frame
 # t = np.array([-0.000447075, 0.010095531, 0.0000743030980229377])  # 单位是m?
 # q = [-0.000136242, 0.001019766, 0.004025249, 0.999991357]
@@ -60,11 +81,14 @@ color_camera_intrinsic_info = np.array(
 T_base_footprint_2_camera_link = create_transform_matrix(
     t=np.array([0.32039, 0.00164, 0.13208]),
     q=np.array([0.0, 0.0, 0.0, 1])
+    # q=np.array([0.0, 0.0, 0.0, 1])
 )  # 将相机坐标系下的点变换到base_footprint坐标系
 T_camera_link_2_camera_depth_frame = create_transform_matrix(
     t=np.array([0.0, 0.0, 0.0]),
-    q=np.array([0.0, 0.0, 0.0, 1])
+    q=np.array([-0.5, 0.5, -0.5, 0.5])  # 相机连杆坐标系 (X轴向前，Z轴向上) -> 相机光学坐标系 （Z轴向前，X轴向右，Y轴向下）
+    # q=np.array([0.0, 0.0, 0.0, 1])
 )
+
 T_depth_2_camera_color_frame = create_transform_matrix(
     t=np.array([-0.000447075, 0.010095531, 0.0000743030980229377]),
     q=np.array([-0.000136242, 0.001019766, 0.004025249, 0.999991357])
@@ -82,6 +106,39 @@ T_base_footprint_2_laser = create_transform_matrix(
 # T_laser_2_camera_color = T_laser_2_base @ T_base_footprint_2_camera_color
 # 正确的静态变换链：Lidar -> base -> camera
 T_laser_2_camera_color = np.linalg.inv(T_base_footprint_2_camera_color) @ T_base_footprint_2_laser
+
+print("原始 T_laser_2_camera_color 计算完毕，开始手动微调...")
+
+# 创建一个修正矩阵，初始为单位矩阵
+T_correction = np.eye(4)
+
+# --- 在这里修改XYZ方向的平移修正量 (单位：米) ---
+# 根据您的图像，点云整体偏高，我们需要让它在图像里“向下”移动。
+# 在相机坐标系中，Y轴通常指向下方，所以我们需要增加Y值。
+# X轴控制左右，Z轴控制前后（远近缩放）。
+
+delta_x = 0.05  # 向右为正，向左为负
+delta_y = 0.0  # 向下为正，向上为负 (先从2厘米开始尝试)
+delta_z = 0.0  # 向前为正，向后为负
+
+T_correction[:3, 3] = np.array([delta_x, delta_y, delta_z])
+
+# 将修正应用到原始变换矩阵上
+T_laser_2_camera_color_final = T_correction @ T_laser_2_camera_color
+T_laser_2_camera_color = T_laser_2_camera_color_final
+
+T_laser_2_camera_color = np.array(
+    [
+        [0.999964, -0.00283691, -0.00805015, -0.00106572],
+        [-0.00805091, -0.000257861, -0.999968, -0.383872],
+        [0.00283474, 0.999996, -0.000280691, - 0.23023],
+        [0, 0, 0, 1]
+    ]
+)
+
+# --- 在后续的所有计算中，使用这个修正后的矩阵 ---
+# 例如: lidar_pcd = lidar_pcd.transform(T_laser_2_camera_color_final)
+
 
 import matplotlib.pyplot as plt
 
@@ -126,24 +183,24 @@ def visualize_lidar_projection_with_depth(matched_df,
         # points_in_camera_frame = lidar_pcd.transform(T_laser_2_color)
         lidar_pcd = lidar_pcd.transform(T_laser_2_color)
 
-        # 绕 Z 轴顺时针旋转90度。
-        rotation_matrix_1 = np.array(
-            [[0, 1, 0, 0],
-             [-1, 0, 0, 0],
-             [0, 0, 1, 0],
-             [0, 0, 0, 1]]
-        )
-        #  Y 轴顺时针旋转90度。
-        rotation_matrix_2 = np.array(
-            [[0, 0, 1, 0],
-             [0, 1, 0, 0],
-             [-1, 0, 0, 0],
-             [0, 0, 0, 1]]
-        )
-        rotation_matrix = rotation_matrix_2 @ rotation_matrix_1
-        points_in_camera_frame = lidar_pcd.transform(np.linalg.inv(rotation_matrix))
+        # # 绕 Z 轴顺时针旋转90度。
+        # rotation_matrix_1 = np.array(
+        #     [[0, 1, 0, 0],
+        #      [-1, 0, 0, 0],
+        #      [0, 0, 1, 0],
+        #      [0, 0, 0, 1]]
+        # )
+        # #  Y 轴顺时针旋转90度。
+        # rotation_matrix_2 = np.array(
+        #     [[0, 0, 1, 0],
+        #      [0, 1, 0, 0],
+        #      [-1, 0, 0, 0],
+        #      [0, 0, 0, 1]]
+        # )
+        # rotation_matrix = rotation_matrix_2 @ rotation_matrix_1
+        # lidar_pcd = lidar_pcd.transform(np.linalg.inv(rotation_matrix))
 
-        points_in_camera_frame = np.asarray(points_in_camera_frame.points)
+        points_in_camera_frame = np.asarray(lidar_pcd.points)
 
         # 2. 将Lidar点变换到相机坐标系
 
@@ -178,13 +235,20 @@ def visualize_lidar_projection_with_depth(matched_df,
         ax.imshow(image_np)
 
         # 使用散点图绘制投影点，颜色由深度决定
-        scatter = ax.scatter(u_valid, v_valid, c=depth_valid, cmap='jet', s=1.5, alpha=0.7)
+        scatter = ax.scatter(
+            u_valid,
+            v_valid,
+            c=depth_valid,
+            cmap='jet',
+            s=5,
+            alpha=0.7
+        )
 
         # 添加颜色条作为图例
         cbar = fig.colorbar(scatter, ax=ax)
         cbar.set_label('Depth (meters)')
 
-        ax.set_title(f"Lidar Projection with Depth, Timestamp: {row['timestamp']}")
+        ax.set_title(f"Lidar Projection, Timestamp: {row['timestamp']}")
         ax.axis('off')  # 关闭坐标轴
 
         # 5. 保存图像
@@ -192,7 +256,287 @@ def visualize_lidar_projection_with_depth(matched_df,
         plt.savefig(output_filename, bbox_inches='tight', pad_inches=0)
         plt.close(fig)  # 关闭图像以释放内存
 
+        ############################
+        # 4. 获取RGB颜色
+        colors = image_np[v_valid.astype(int), u_valid.astype(int)]  # 归一化到 [0, 1]
+
+        # 5. 根据深度值重建3D点
+        x_3d = (u_valid - cx) * depth_valid / fx
+        y_3d = (v_valid - cy) * depth_valid / fy
+        z_3d = depth_valid
+
+        points_3d = np.vstack((x_3d, y_3d, z_3d)).T
+
+        # 6. 使用Open3D创建点云对象并可视化
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points_3d)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        # 7. 保存点云
+        output_filename = vis_output_dir / f"projection_3d_{row['timestamp']}.ply"
+        o3d.io.write_point_cloud(str(output_filename), pcd)
+
     print(f"可视化图像已保存至: {vis_output_dir}")
+
+
+def visualize_lidar_projection_with_depth_v2(matched_df,
+                                             color_camera_intrinsic,
+                                             T_laser_2_color,
+                                             output_dir='./'):
+    """
+    可视化Lidar点云到图像的投影，并用颜色表示深度。
+    同时将所有帧的点云累加，生成整个场景的点云。
+    """
+    print("开始生成Lidar投影深度可视化图像及累计点云...")
+
+    from tqdm import tqdm
+
+    # 创建输出目录
+    vis_output_dir = Path(output_dir) / "lidar_2_pc"
+    vis_output_dir.mkdir(exist_ok=True)
+
+    # 初始化一个空的全局点云用于累加
+    global_pcd = o3d.geometry.PointCloud()
+
+    for _, row in tqdm(matched_df.iterrows(), total=len(matched_df)):
+        # 1. 加载Lidar点云并转换坐标系
+        lidar_pcd = o3d.io.read_point_cloud(row['lidar_file'])
+        lidar_pcd.transform(T_laser_2_color)  # 转换到相机坐标系或世界坐标系
+        points = np.asarray(lidar_pcd.points)
+
+        # 2. 加载图像
+        try:
+            image_np = plt.imread(row['image_file'])
+        except FileNotFoundError:
+            print(f"警告：找不到图像文件 {row['image_file']}，跳过此帧。")
+            continue
+
+        img_h, img_w, _ = image_np.shape
+
+        # 3. 投影计算
+        valid_idx_z = points[:, 2] > 0.1  # 过滤掉太近的点
+        u = (points[:, 0] * color_camera_intrinsic[0, 0] / points[:, 2] + color_camera_intrinsic[0, 2])
+        v = (points[:, 1] * color_camera_intrinsic[1, 1] / points[:, 2] + color_camera_intrinsic[1, 2])
+
+        valid_idx_u = (u >= 0) & (u < img_w)
+        valid_idx_v = (v >= 0) & (v < img_h)
+        valid_mask = valid_idx_z & valid_idx_u & valid_idx_v
+
+        u_valid = u[valid_mask]
+        v_valid = v[valid_mask]
+        depth_valid = points[valid_mask, 2]
+
+        if len(depth_valid) == 0:
+            print(f"警告：在时间戳 {row['timestamp']} 没有有效的Lidar点投影到图像上。")
+            continue
+
+        # 4. 获取对应像素的颜色
+        colors = image_np[v_valid.astype(int), u_valid.astype(int)]  # 归一化到 [0, 1]
+
+        depth_points = points[valid_mask]
+
+        # 获取变换矩阵
+        homogeneous_matrix = np.array(json.loads(row['odom_data']['homogeneous_matrix'])).reshape(4, 4)
+        tf_map2odom_matrix = np.array(
+            pose_to_homogeneous_matrix(
+                row['tf_map2odom_data']['translation_x'],
+                row['tf_map2odom_data']['translation_y'],
+                row['tf_map2odom_data']['translation_z'],
+                row['tf_map2odom_data']['rotation_x'],
+                row['tf_map2odom_data']['rotation_y'],
+                row['tf_map2odom_data']['rotation_z'],
+                row['tf_map2odom_data']['rotation_w'],
+            )
+        ).reshape(4, 4)
+        rotation_matrix_1 = np.array(
+            [[0, 1, 0, 0],
+             [-1, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 0, 0, 1]]
+        )
+        rotation_matrix_2 = np.array(
+            [[0, 0, 1, 0],
+             [0, 1, 0, 0],
+             [-1, 0, 0, 0],
+             [0, 0, 0, 1]]
+        )
+        rotation_matrix = rotation_matrix_2 @ rotation_matrix_1
+
+        depth_points_hom = np.hstack([depth_points, np.ones((len(depth_points), 1))])
+        depth_points_hom = (tf_map2odom_matrix @ homogeneous_matrix @ rotation_matrix @ depth_points_hom.T).T[:, :3]
+        points_transformed = depth_points_hom[:, :3]
+
+
+        # 5. 创建当前帧的带颜色点云
+        current_pcd = o3d.geometry.PointCloud()
+        current_pcd.points = o3d.utility.Vector3dVector(points_transformed)
+        current_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        output_filename = vis_output_dir / f"projection_{row['timestamp']}.ply"
+        o3d.io.write_point_cloud(str(output_filename), current_pcd)
+        # 6. 累加到全局点云
+        global_pcd += current_pcd
+
+        # 7. （可选）保存每一帧的投影图
+        # fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
+        # ax.imshow(image_np)
+        # scatter = ax.scatter(u_valid, v_valid, c=depth_valid, cmap='jet', s=5, alpha=0.7)
+        # cbar = fig.colorbar(scatter, ax=ax)
+        # cbar.set_label('Depth (meters)')
+        # ax.set_title(f"Lidar Projection, Timestamp: {row['timestamp']}")
+        # ax.axis('off')
+        # output_filename = vis_output_dir / f"projection_{row['timestamp']}.png"
+        # plt.savefig(str(output_filename), bbox_inches='tight', pad_inches=0)
+        # plt.close(fig)
+
+    # 8. 对全局点云进行下采样（可选）
+    voxel_size = 0.02
+    global_pcd = global_pcd.voxel_down_sample(voxel_size)
+
+    # 9. 保存完整场景点云
+    output_global_pcd_path = vis_output_dir / "scene_pointcloud.ply"
+    o3d.io.write_point_cloud(str(output_global_pcd_path), global_pcd)
+
+
+    print(f"可视化图像已保存至: {vis_output_dir}")
+    print(f"全局点云已保存至: {output_global_pcd_path}")
+
+
+def visualize_lidar_projection_with_depth_mask(
+        matched_df,
+        color_camera_intrinsic,
+        T_laser_2_color,
+        output_dir='./'
+):
+    """
+    可视化Lidar点云到图像的投影，并用颜色表示深度。
+    *** 此函数已被修改以实现未覆盖区域的掩码效果 ***
+    """
+    print("开始生成Lidar投影深度可视化图像...")
+    from tqdm import tqdm
+
+    vis_output_dir = Path(output_dir) / "projection_visualization_masked"  # 修改了输出文件夹名以区分
+    vis_output_dir.mkdir(exist_ok=True)
+
+    for _, row in tqdm(matched_df.iterrows(), total=len(matched_df)):
+        lidar_pcd = o3d.io.read_point_cloud(row['lidar_file'])
+        image_path = row['image_file']
+
+        try:
+            # 使用OpenCV加载图像，以便与掩码处理统一（BGR格式）
+            image_bgr = cv2.imread(image_path)
+            # 转换为Matplotlib使用的RGB格式用于显示
+            image_np = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        except (FileNotFoundError, AttributeError):  # AttributeError for cv2.imread returning None
+            print(f"警告：找不到或无法读取图像文件 {image_path}，跳过此帧。")
+            continue
+
+        # 使用 OpenCV 加载图像，获取原始尺寸
+        image_bgr = cv2.imread(image_path)
+        image_np = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        img_h, img_w, _ = image_np.shape
+
+        lidar_pcd = lidar_pcd.transform(T_laser_2_color)
+        points_in_camera_frame = np.asarray(lidar_pcd.points)
+
+        valid_idx_z = points_in_camera_frame[:, 2] > 0.1
+
+        fx, fy = color_camera_intrinsic[0, 0], color_camera_intrinsic[1, 1]
+        cx, cy = color_camera_intrinsic[0, 2], color_camera_intrinsic[1, 2]
+
+        u = (points_in_camera_frame[:, 0] * fx / points_in_camera_frame[:, 2] + cx)
+        v = (points_in_camera_frame[:, 1] * fy / points_in_camera_frame[:, 2] + cy)
+
+        valid_idx_u = (u >= 0) & (u < img_w)
+        valid_idx_v = (v >= 0) & (v < img_h)
+
+        valid_mask = valid_idx_z & valid_idx_u & valid_idx_v
+
+        u_valid = u[valid_mask]
+        v_valid = v[valid_mask]
+        depth_valid = points_in_camera_frame[valid_mask, 2]
+
+        if len(depth_valid) == 0:
+            print(f"警告：在时间戳 {row['timestamp']} 没有有效的Lidar点投影到图像上。")
+            continue
+
+        # --- MODIFICATION START: 创建并应用掩码 ---
+
+        # 1. 准备用于计算凸包的点 (N, 2) 格式
+        lidar_pixel_points = np.vstack((u_valid, v_valid)).T
+
+        background_image = image_np.copy()  # 默认背景为原图
+
+        try:
+            # 2. 计算凸包并创建掩码
+            # 至少需要3个点才能形成一个二维凸包
+            if len(lidar_pixel_points) > 3:
+                hull = ConvexHull(lidar_pixel_points)
+                hull_points = lidar_pixel_points[hull.vertices].astype(int)
+
+                # 创建一个与原图一样大的黑色掩码
+                lidar_mask = np.zeros(image_np.shape[:2], dtype=np.uint8)
+                # 在掩码上将凸包区域填充为白色
+                cv2.fillPoly(lidar_mask, [hull_points], 255)
+
+                # 3. 应用掩码来淡化背景
+                fade_factor = 0.3  # 定义淡化程度 (0.0 - 1.0), 值越小越暗
+                # 创建一个三通道的掩码以便于广播
+                mask_3ch = cv2.cvtColor(lidar_mask, cv2.COLOR_GRAY2BGR)
+
+                # 创建淡化后的图像
+                faded_image_bg = (image_np.copy() * fade_factor).astype(np.uint8)
+
+                # 使用 np.where 高效合并
+                # 在掩码为白色的地方（Lidar区域），使用原图；否则，使用淡化后的图像
+                background_image = np.where(mask_3ch == 255, image_np, faded_image_bg)
+
+        except Exception as e:
+            # 如果点太少或共线无法形成凸包, 则不使用mask，直接使用原始背景
+            print(f"警告: 无法为时间戳 {row['timestamp']} 创建凸包 ({e})。将使用原始背景。")
+            # background_image 已经默认为原图了, 无需操作
+            pass
+
+        # --- MODIFICATION END ---
+
+        # 设置目标分辨率为图像的原始分辨率
+        target_dpi = 80  # 可调整，或用 image_bgr.shape[1] 获取实际 DPI
+        # 640x480
+        # 计算图像尺寸（英寸） = 像素数 / DPI
+        fig_width_inch = img_w / target_dpi
+        fig_height_inch = img_h / target_dpi
+
+        # 创建绘图区域（已根据原始图像尺寸调整）
+        fig, ax = plt.subplots(figsize=(fig_width_inch, fig_height_inch), dpi=target_dpi)
+
+        # 设置无背景色、无坐标轴
+        ax.imshow(background_image)
+        ax.set_axis_off()
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+        # 绘制散点图（适配透明、无填充）
+        scatter = ax.scatter(
+            u_valid,
+            v_valid,
+            c=depth_valid,
+            cmap='jet',
+            s=5,  #
+            # s=1.5,
+            alpha=0.7,
+            edgecolors='none',  # 不显示边缘
+            facecolors='none'  # 不填充内部，仅保留颜色映射
+        )
+
+        # 如果你需要颜色条（可选）
+        # cbar = fig.colorbar(scatter, ax=ax, shrink=0.5)
+        # cbar.set_label('Depth (meters)')
+
+        # 保存图像（带透明通道）
+        output_filename = vis_output_dir / f"projection_masked_{row['timestamp']}.png"
+        plt.savefig(output_filename, bbox_inches='tight', pad_inches=0, dpi=target_dpi, transparent=True)
+        plt.close(fig)
+
+    print(f"带掩码的可视化图像已保存至: {vis_output_dir}")
 
 
 def pose_to_homogeneous_matrix(tran_x, tran_y, tran_z, rot_x, rot_y, rot_z, rot_w):
@@ -608,12 +952,12 @@ def generate_color_pointcloud(matched_df,
     for _, row in tqdm(matched_df.iterrows()):
         # 加载深度图
         depth_file = os.path.join(depth_dir, os.path.basename(row['depth_file']))
-        depth_map = np.load(depth_file)
+        depth_map = np.load(depth_file)  # (400,640)
 
         # 加载图像
         image_file = os.path.join(image_dir, os.path.basename(row['image_file']))
         image = o3d.io.read_image(image_file)
-        image_array = np.asarray(image)
+        image_array = np.asarray(image)  # (480,640,3)
 
         # 获取变换矩阵 base -> world
         homogeneous_matrix = np.array(json.loads(row['odom_data']['homogeneous_matrix'])).reshape(4, 4)
@@ -687,6 +1031,38 @@ def generate_color_pointcloud(matched_df,
         all_colors.append(colors)
         all_homogeneous_matrix.append(homogeneous_matrix)
 
+        save_pcd = False
+        save_proj = False
+        if save_pcd:
+            # 6. 使用Open3D创建点云对象并可视化
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(points_transformed)
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+            # 7. 保存点云
+            output_filename = output_dir / "depth_rgb" / f"projection_3d_{row['timestamp']}.ply"
+            o3d.io.write_point_cloud(str(output_filename), pcd)
+
+        if save_proj:
+            fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
+            ax.imshow(image_array)
+
+            scatter = ax.scatter(
+                u_color,
+                v_color,
+                c=z_points,
+                cmap='jet', s=5, alpha=0.7, edgecolors='none')
+            cbar = fig.colorbar(scatter, ax=ax)
+            cbar.set_label('Depth (meters)')
+
+            ax.set_title(f"Depth Point Cloud Projection - Timestamp: {row['timestamp']}")
+            ax.axis('off')
+
+            vis_output_dir = Path(output_dir) / "depth_projection_vis"
+            vis_output_dir.mkdir(exist_ok=True)
+            output_img_path = vis_output_dir / f"depth_proj_{row['timestamp']}.png"
+            plt.savefig(str(output_img_path), bbox_inches='tight', pad_inches=0)
+            plt.close(fig)
+
     global_pointcloud = o3d.geometry.PointCloud()
     global_pointcloud.points = o3d.utility.Vector3dVector(all_points[0])
     global_pointcloud.colors = o3d.utility.Vector3dVector(all_colors[0])
@@ -732,7 +1108,7 @@ def generate_color_pointcloud(matched_df,
         voxel_size=voxel_size, min_bound=global_pointcloud.get_min_bound(), max_bound=global_pointcloud.get_max_bound()
     )
 
-    _, ind1 = global_pointcloud.remove_radius_outlier(nb_points=30, radius=0.05)
+    _, ind1 = global_pointcloud.remove_radius_outlier(nb_points=10, radius=0.05)
     # _, ind1 = global_pointcloud.remove_radius_outlier(nb_points=50, radius=0.08)
     global_pointcloud1 = global_pointcloud.select_by_index(ind1)
     o3d.io.write_point_cloud(
@@ -750,7 +1126,7 @@ def generate_color_pointcloud(matched_df,
         global_pointcloud2
     )
 
-    _, ind2 = global_pointcloud1.remove_statistical_outlier(nb_neighbors=10, std_ratio=2.0)
+    _, ind2 = global_pointcloud1.remove_statistical_outlier(nb_neighbors=10, std_ratio=1.0)
     # _, ind2 = global_pointcloud1.remove_statistical_outlier(nb_neighbors=30, std_ratio=1.5)
     global_pointcloud3 = global_pointcloud1.select_by_index(ind2)
     o3d.io.write_point_cloud(
@@ -950,21 +1326,33 @@ if __name__ == '__main__':
     # o3d.io.write_point_cloud(os.path.join(output_dir, "color_pcd.ply"), color_pcd)
 
     # 2. 调用新函数生成可视化图像
-    visualize_lidar_projection_with_depth(
+    # visualize_lidar_projection_with_depth(
+    #     matched_df=matched_df,
+    #     color_camera_intrinsic=color_camera_intrinsic_info,
+    #     T_laser_2_color=T_laser_2_camera_color,
+    #     output_dir=output_dir
+    # )
+
+    visualize_lidar_projection_with_depth_v2(
         matched_df=matched_df,
         color_camera_intrinsic=color_camera_intrinsic_info,
         T_laser_2_color=T_laser_2_camera_color,
         output_dir=output_dir
-    )
+    )   # 根据激光投影到图像上的有效点来生成
+
+    # visualize_lidar_projection_with_depth_mask(
+    #     matched_df=matched_df,
+    #     color_camera_intrinsic=color_camera_intrinsic_info,
+    #     T_laser_2_color=T_laser_2_camera_color,
+    #     output_dir=output_dir
+    # )
 
     # 2. 调用新函数生成着色的Lidar点云
     colored_lidar_pcd = generate_lidar_color_pointcloud(
         matched_df=matched_df,
         color_camera_intrinsic=color_camera_intrinsic_info,
-        # T_base_2_color=T_base_footprint_2_camera_color,
-        # T_base_2_laser=T_base_footprint_2_laser,
         T_laser_2_color=T_laser_2_camera_color,
         use_ICP_register=False,
         output_dir=output_dir
     )
-    o3d.io.write_point_cloud(os.path.join(output_dir, "color_lidar_pcd.ply"), colored_lidar_pcd)
+    # o3d.io.write_point_cloud(os.path.join(output_dir, "color_lidar_pcd.ply"), colored_lidar_pcd)

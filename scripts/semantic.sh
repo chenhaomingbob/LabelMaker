@@ -72,7 +72,6 @@ for workspace in "$PARENT_DIR"/*/; do
     fi
 
 
-
     echo "=========================================================="
     echo ">>> 开始处理第 ${processed_count} / ${total_dirs} 个工作区: $workspace"
     echo "=========================================================="
@@ -130,9 +129,12 @@ for workspace in "$PARENT_DIR"/*/; do
     workspace_end_time=$SECONDS
     workspace_duration=$((workspace_end_time - workspace_start_time))
 
+    current_duration=$((SECONDS - start_time))
+
     echo "----------------------------------------------------------"
     echo ">>> 工作区处理完成: $workspace"
     printf ">>> 该工作区耗时: %d 分 %d 秒\n" $((workspace_duration / 60)) $((workspace_duration % 60))
+    printf ">>> 脚本已经耗时: %d 分 %d 秒\n" $((current_duration / 60)) $((current_duration % 60))
     echo "----------------------------------------------------------"
     echo ""
 done

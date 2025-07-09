@@ -7,7 +7,6 @@ from mayavi import mlab
 import argparse
 import math
 
-
 def get_grid_coords(dims, resolution):
     """
     :param dims: the dimensions of the grid [x, y, z] (i.e. [256, 256, 32])
@@ -69,17 +68,18 @@ def draw(
     # Compute the voxels coordinates
     grid_coords = get_grid_coords(
         [voxels.shape[0], voxels.shape[1], voxels.shape[2]], voxel_size
-    )  # z先增长
+    )  #
 
     # Attach the predicted class to every voxel
     grid_coords = np.vstack(
         (grid_coords.T, voxels.reshape(-1))
-    ).T  #
+    ).T #
 
     # Remove empty and unknown voxels
     occupied_voxels = grid_coords[(grid_coords[:, 3] > 0) & (grid_coords[:, 3] < 255)]
+    # occupied_voxels = grid_coords[(grid_coords[:, 3] < 255)]
 
-    figure = mlab.figure(size=(1600, 900), bgcolor=(1, 1, 1))  # 图像背景
+    figure = mlab.figure(size=(1600, 900), bgcolor=(1, 1, 1)) # 图像背景
 
     # Draw the camera
     mlab.triangular_mesh(
@@ -128,6 +128,7 @@ def draw(
 
     plt_plot.module_manager.scalar_lut_manager.lut.table = colors
 
+
     x = np.append(x, np.mean(x[1:]))  # 添加
     y = np.append(y, np.mean(y[1:]))
     z = np.append(z, np.mean(z[1:]))
@@ -135,6 +136,8 @@ def draw(
     x = np.append(x, 0)  # 添加世界原点
     y = np.append(y, 0)
     z = np.append(z, 0)
+
+
 
     # 调整视角，让相机中心始终在屏幕前方
     new_azimuth = math.atan2(y[-2] - y[0], x[-2] - x[0]) / math.pi * 180  # 调整方位角
@@ -158,18 +161,8 @@ def main(args):
     vox_origin = b["voxel_origin"]
 
     if voxel_size == 0.08:
-        scene = b['target_1_4'] if 'target_1_4' in b else b['target']
-        print(scene.shape)
-        # 对于NYU的GT .pkl   需要交换yz & xy
-        # scene = np.swapaxes(scene, 1, 2)
-        # scene = np.swapaxes(scene, 0, 1)
-
-        # 对于NYU的Pred .pkl  仅需要交换 xy.   yz提前在indoor_occ dataloader里面处理了
-        # scene = np.swapaxes(scene, 0, 1)
-
-        # 对于ArkitScene的 Pred .pkl 不需要额外处理
-        # 对于ArkitScene的 GT .pkl 不需要额外处理
-        # scene = np.swapaxes(scene, 0, 1)
+        scene = b['pred']
+        scene = np.swapaxes(scene, 0, 1)
     else:
         raise Exception(f"Not supported voxel size for {voxel_size}")
 
