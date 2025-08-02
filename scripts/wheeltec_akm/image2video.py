@@ -6,13 +6,14 @@ import re
 
 # 包含图片的文件夹路径
 # 示例: 'C:/Users/YourUser/Desktop/MyImages' 或 'path/to/your/images'
-IMAGE_FOLDER = '/data1/chm/datasets/wheeltec/record_20250625/outputs_dirs/projection_visualization_masked'
+IMAGE_FOLDER = '/data1/chm/datasets/wheeltec/record_20250711_1540/images'
+# IMAGE_FOLDER = '/data1/chm/datasets/wheeltec/record_20250625/outputs_dirs/projection_visualization_masked'
 
 # 输出的视频文件名
-VIDEO_NAME = '/data1/chm/datasets/wheeltec/record_20250625/outputs_dirs/projection_visualization_masked/output_video.mp4'
+VIDEO_NAME = '/data1/chm/datasets/wheeltec/record_20250711_1540/images/output_video.mp4'
 
 # 生成视频的帧率 (Frames Per Second)
-FPS = 10
+FPS = 20
 
 # 要查找的图片文件扩展名
 IMAGE_EXTENSION = '.png'
@@ -34,11 +35,15 @@ def create_video_from_images():
         return
 
     # 2. 对图片进行自然排序 (例如，正确处理 1, 2, 10 的顺序)
-    def natural_sort_key(s):
-        return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+    # def natural_sort_key(s):
+    #     return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
 
-    images.sort(key=natural_sort_key)
+    # images.sort(key=natural_sort_key)
+    # images.sort()
 
+    images = sorted(images, key=lambda p: float(os.path.basename(p)[:-4]))
+
+    images = images[::20]
     print(f"找到了 {len(images)} 张图片。")
 
     # 3. 读取第一张图片以获取视频的宽度和高度

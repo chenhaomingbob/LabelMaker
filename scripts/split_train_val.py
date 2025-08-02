@@ -205,7 +205,7 @@ def create_split_files_by_frames(data_dir, split_ratio=0.8):
     print("\n脚本执行完毕！")
 
 if __name__ == '__main__':
-    dataset_directory = '/data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v3'
+    dataset_directory = '/data1/chm/datasets/arkitscenes/LabelMaker/mini_data_v4'
     train_split_ratio = 0.8  # 80% 训练，20% 验证
 
     create_split_files_by_frames(dataset_directory, train_split_ratio)

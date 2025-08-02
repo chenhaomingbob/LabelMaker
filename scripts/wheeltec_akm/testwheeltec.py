@@ -1029,15 +1029,17 @@ def generate_color_pointcloud(matched_df,
         all_colors.append(colors)
         all_homogeneous_matrix.append(homogeneous_matrix)
 
-        save_pcd = True
-        save_proj = True
+        save_pcd = False
+        save_proj = False
         if save_pcd:
             # 6. 使用Open3D创建点云对象并可视化
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(points_transformed)
             pcd.colors = o3d.utility.Vector3dVector(colors)
             # 7. 保存点云
-            output_filename = output_dir / "depth_rgb" / f"projection_3d_{row['timestamp']}.ply"
+            vis_output_dir = Path(output_dir) / "depth_rgb"
+            vis_output_dir.mkdir(exist_ok=True)
+            output_filename = vis_output_dir / f"projection_3d_{row['timestamp']}.ply"
             o3d.io.write_point_cloud(str(output_filename), pcd)
 
         if save_proj:
@@ -1309,21 +1311,21 @@ if __name__ == '__main__':
         max_time_diff_sec=0.05  # 传感器组中最慢频率周期的一半
     )
 
-    matched_df = matched_df.iloc[::10]
+    matched_df = matched_df.iloc[::4]
     print(matched_df.head())
     print(len(matched_df))
 
     # 生成彩色点云
-    color_pcd = generate_color_pointcloud(
-        matched_df,
-        depth_camera_intrinsic_info,
-        color_camera_intrinsic_info,
-        depth_dir,
-        image_dir,
-        T_depth_2_camera_color_frame,  # 传递变换矩阵,
-        use_ICP_register=False,
-        output_dir=output_dir
-    )
+    # color_pcd = generate_color_pointcloud(
+    #     matched_df,
+    #     depth_camera_intrinsic_info,
+    #     color_camera_intrinsic_info,
+    #     depth_dir,
+    #     image_dir,
+    #     T_depth_2_camera_color_frame,  # 传递变换矩阵,
+    #     use_ICP_register=False,
+    #     output_dir=output_dir
+    # )
     # o3d.io.write_point_cloud(os.path.join(output_dir, "color_pcd.ply"), color_pcd)
 
     # 2. 调用新函数生成可视化图像
@@ -1334,12 +1336,13 @@ if __name__ == '__main__':
     #     output_dir=output_dir
     # )
 
-    # visualize_lidar_projection_with_depth_v2(
-    #     matched_df=matched_df,
-    #     color_camera_intrinsic=color_camera_intrinsic_info,
-    #     T_laser_2_color=T_laser_2_camera_color,
-    #     output_dir=output_dir
-    # )   # 根据激光投影到图像上的有效点来生成
+    # 通过激光点云累积生成的点云
+    visualize_lidar_projection_with_depth_v2(
+        matched_df=matched_df,
+        color_camera_intrinsic=color_camera_intrinsic_info,
+        T_laser_2_color=T_laser_2_camera_color,
+        output_dir=output_dir
+    )  # 根据激光投影到图像上的有效点来生成
 
     # visualize_lidar_projection_with_depth_mask(
     #     matched_df=matched_df,

@@ -17,6 +17,7 @@ from sklearn.neighbors import KDTree
 import pickle
 from copy import deepcopy
 import math as m
+from collections import Counter
 
 logging.basicConfig(level="INFO")
 log = logging.getLogger('Mesh2Occupancy')
@@ -107,7 +108,6 @@ def main(
         cad_retrieval_mesh: Union[str, Path],
         label_space='occ11',
         voxel_size=0.08,
-
 ):
     scene_dir = Path(scene_dir)
     intput_label = Path(input_label)  #
@@ -142,13 +142,13 @@ def main(
     assert input_label_path.exists() and input_label_path.is_file()
     #####
     cad_object_label_path = scene_dir / cad_object_label
-    assert cad_object_label_path.exists() and cad_object_label_path.is_file()
+    # assert cad_object_label_path.exists() and cad_object_label_path.is_file()
 
     original_object_index_path = scene_dir / original_object_index
-    assert original_object_index_path.exists() and original_object_index_path.is_file()
+    # assert original_object_index_path.exists() and original_object_index_path.is_file()
 
     cad_retrieval_mesh_path = scene_dir / cad_retrieval_mesh
-    assert cad_retrieval_mesh_path.exists() and cad_retrieval_mesh_path.is_file()
+    # assert cad_retrieval_mesh_path.exists() and cad_retrieval_mesh_path.is_file()
 
     output_dir = scene_dir / output_frame_folder
     shutil.rmtree(output_dir, ignore_errors=True)  # remove output_dir if it exists
@@ -163,104 +163,103 @@ def main(
     label_3d = np.loadtxt(str(input_label_path))  # (N,)
 
     assert len(label_3d) == len(vertices)
-    fast_search_classes = ['bed', 'bench', 'chair', 'clock', 'display', 'flowerpot', 'guitar', 'lamp', 'laptop',
-                           'microwaves', 'piano', 'printer', 'sofa', 'stove', 'table', 'trash bin', 'washer']
-    fast_cad2occ = [
-        6,  # 'bed'
-        10,  # 'bench'
-        5,  # 'chair'
-        11,  # 'clock'
-        11,  # 'display'
-        11,  # 'flowerpot'
-        11,  # 'guitar'
-        11,  # 'lamp'
-        11,  # 'laptop
-        11,  # microwaves
-        11,  # piano
-        11,  # printer
-        7,  # sofa
-        11,  # 'stove'
-        8,  # table
-        10,  # 'trash bin
-        10,  # washer
-    ]
-    cad_original_object_index = np.loadtxt(str(original_object_index_path)).astype(int)
-    cad_retrieval_object_label = np.loadtxt(str(cad_object_label_path))
-    cad_retrieval_object_label = np.array(fast_cad2occ)[cad_retrieval_object_label.astype(int)]
-    # cad_retrieval_object_label = fast_cad2occ(cad_retrieval_object_label)
-    cad_retrieval_mesh = o3d.io.read_triangle_mesh(str(cad_retrieval_mesh_path))
-    transform_matrix = np.linalg.inv(transform_ScanNet_to_py3D())
-    cad_retrieval_mesh = alignPclMesh(cad_retrieval_mesh, transform_matrix)
-    # cad_retrieval_vertices = np.asarray(cad_retrieval_mesh.vertices)  # (N,3)
 
-    # 去除物体的扫描部分
-    label_3d = np.delete(label_3d, cad_original_object_index)
-    mesh.remove_vertices_by_index(cad_original_object_index)
-    bg_vertices = np.asarray(mesh.vertices)
-    bg_label_3d = label_3d
-    # 添加物体的CAD模型
-    ##################### CAD模型单独体素化
-    # 1. 先执行CAD模型的水密体素化
-    changes = np.where(cad_retrieval_object_label[:-1] != cad_retrieval_object_label[1:])[0] + 1
-    start_indices = np.concatenate([[0], changes])
-    end_indices = np.concatenate([changes, [len(cad_retrieval_object_label)]])
+    exist_cad = cad_retrieval_mesh_path.exists() and cad_retrieval_mesh_path.is_file() and original_object_index_path.exists() and original_object_index_path.is_file() and cad_object_label_path.exists() and cad_object_label_path.is_file()
+    if exist_cad:
+        fast_search_classes = ['bed', 'bench', 'chair', 'clock', 'display', 'flowerpot', 'guitar', 'lamp', 'laptop',
+                               'microwaves', 'piano', 'printer', 'sofa', 'stove', 'table', 'trash bin', 'washer']
+        fast_cad2occ = [
+            6,  # 'bed'
+            10,  # 'bench'
+            5,  # 'chair'
+            11,  # 'clock'
+            11,  # 'display'
+            11,  # 'flowerpot'
+            11,  # 'guitar'
+            11,  # 'lamp'
+            11,  # 'laptop
+            11,  # microwaves
+            11,  # piano
+            11,  # printer
+            7,  # sofa
+            11,  # 'stove'
+            8,  # table
+            10,  # 'trash bin
+            10,  # washer
+        ]
+        cad_original_object_index = np.loadtxt(str(original_object_index_path)).astype(int)
+        cad_retrieval_object_label = np.loadtxt(str(cad_object_label_path))
+        cad_retrieval_object_label = np.array(fast_cad2occ)[cad_retrieval_object_label.astype(int)]
+        # cad_retrieval_object_label = fast_cad2occ(cad_retrieval_object_label)
+        cad_retrieval_mesh = o3d.io.read_triangle_mesh(str(cad_retrieval_mesh_path))
+        transform_matrix = np.linalg.inv(transform_ScanNet_to_py3D())
+        cad_retrieval_mesh = alignPclMesh(cad_retrieval_mesh, transform_matrix)
+        # cad_retrieval_vertices = np.asarray(cad_retrieval_mesh.vertices)  # (N,3)
 
-    vertices = np.asarray(cad_retrieval_mesh.vertices)
-    triangles = np.asarray(cad_retrieval_mesh.triangles)
-    separate_meshes = []
-    for start, end in zip(start_indices, end_indices):
-        # 当前标签块的顶点范围
-        label = cad_retrieval_object_label[start]
-        vertex_indices = np.arange(start, end)
+        # 去除物体的扫描部分
+        label_3d = np.delete(label_3d, cad_original_object_index)
+        mesh.remove_vertices_by_index(cad_original_object_index)
+        bg_vertices = np.asarray(mesh.vertices)
+        bg_label_3d = label_3d
+        # 添加物体的CAD模型
+        ##################### CAD模型单独体素化
+        # 1. 先执行CAD模型的水密体素化
+        changes = np.where(cad_retrieval_object_label[:-1] != cad_retrieval_object_label[1:])[0] + 1
+        start_indices = np.concatenate([[0], changes])
+        end_indices = np.concatenate([changes, [len(cad_retrieval_object_label)]])
 
-        # 筛选完全属于当前块的三角形
-        mask = np.all(np.isin(triangles, vertex_indices), axis=1)
-        valid_triangles = triangles[mask] - start  # 重映射索引到0-based
+        vertices = np.asarray(cad_retrieval_mesh.vertices)
+        triangles = np.asarray(cad_retrieval_mesh.triangles)
+        separate_meshes = []
+        for start, end in zip(start_indices, end_indices):
+            # 当前标签块的顶点范围
+            label = cad_retrieval_object_label[start]
+            vertex_indices = np.arange(start, end)
 
-        # 创建独立模型
-        mesh_part = o3d.geometry.TriangleMesh()
-        mesh_part.vertices = o3d.utility.Vector3dVector(vertices[start:end])
-        mesh_part.triangles = o3d.utility.Vector3iVector(valid_triangles)
-        separate_meshes.append((label, mesh_part))  # 保存标签和模型
+            # 筛选完全属于当前块的三角形
+            mask = np.all(np.isin(triangles, vertex_indices), axis=1)
+            valid_triangles = triangles[mask] - start  # 重映射索引到0-based
 
-    all_voxels = []
-    all_sem_labels = []
-    for label, mesh in separate_meshes:
-        # 方法二：使用Trimesh（更推荐） 执行水密体素化
-        voxel_matrix, centers = voxelize_with_trimesh(mesh, voxel_size)
+            # 创建独立模型
+            mesh_part = o3d.geometry.TriangleMesh()
+            mesh_part.vertices = o3d.utility.Vector3dVector(vertices[start:end])
+            mesh_part.triangles = o3d.utility.Vector3iVector(valid_triangles)
+            separate_meshes.append((label, mesh_part))  # 保存标签和模型
 
-        all_voxels.append(centers)  # 存储每个模型的体素
-        all_sem_labels.append(np.array([label] * len(centers)))
+        all_voxels = []
+        all_sem_labels = []
+        for label, mesh in separate_meshes:
+            # 方法二：使用Trimesh（更推荐） 执行水密体素化
+            voxel_matrix, centers = voxelize_with_trimesh(mesh, voxel_size)
 
-    # 合并所有体素
-    combined_voxels = np.vstack(all_voxels)
-    combined_sem_labels = np.concatenate(all_sem_labels)
+            all_voxels.append(centers)  # 存储每个模型的体素
+            all_sem_labels.append(np.array([label] * len(centers)))
 
-    # voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
-    #     o3d.geometry.PointCloud(o3d.utility.Vector3dVector(combined_voxels)),
-    #     voxel_size=voxel_size
-    # )
-    # voxel_centers = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()]) * voxel_size
-    # cad_pcd = o3d.geometry.PointCloud()
-    # cad_pcd.points = o3d.utility.Vector3dVector(voxel_centers)
-    # o3d.io.write_point_cloud(str(scene_dir / 'CAD_model_points.ply'), cad_pcd)
-    # assert len(voxel_centers) == len(combined_sem_labels)
-    ##################### CAD模型单独体素化
-    # mesh = mesh + cad_retrieval_mesh
-    # label_3d = np.concatenate([label_3d, cad_retrieval_object_label])
-    #
-    # vertices = np.asarray(mesh.vertices)
-    scene_vertices = np.concatenate([bg_vertices, combined_voxels])
-    scene_label_3d = np.concatenate([bg_label_3d, combined_sem_labels])
+        # 合并所有体素
+        combined_voxels = np.vstack(all_voxels)
+        combined_sem_labels = np.concatenate(all_sem_labels)
 
-    assert len(scene_label_3d) == len(scene_vertices)
-    vertices = scene_vertices
-    label_3d = scene_label_3d
-    # debug
-    # tmp = o3d.io.write_triangle_mesh(
-    #     os.path.join("/home/chm/datasets/arkitscenes/labelmaker/47333462", "test.ply"),
-    #     mesh
-    # )
+        # voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+        #     o3d.geometry.PointCloud(o3d.utility.Vector3dVector(combined_voxels)),
+        #     voxel_size=voxel_size
+        # )
+        # voxel_centers = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()]) * voxel_size
+        # cad_pcd = o3d.geometry.PointCloud()
+        # cad_pcd.points = o3d.utility.Vector3dVector(voxel_centers)
+        # o3d.io.write_point_cloud(str(scene_dir / 'CAD_model_points.ply'), cad_pcd)
+        # assert len(voxel_centers) == len(combined_sem_labels)
+        ##################### CAD模型单独体素化
+        # mesh = mesh + cad_retrieval_mesh
+        # label_3d = np.concatenate([label_3d, cad_retrieval_object_label])
+        #
+        # vertices = np.asarray(mesh.vertices)
+        scene_vertices = np.concatenate([bg_vertices, combined_voxels])
+        scene_label_3d = np.concatenate([bg_label_3d, combined_sem_labels])
+
+        assert len(scene_label_3d) == len(scene_vertices)
+        vertices = scene_vertices
+        label_3d = scene_label_3d
+
 
     # define color map for visualization
     num_classes = 2000
@@ -281,7 +280,7 @@ def main(
     ##############################
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(vertices)
-    o3d.io.write_point_cloud(str(scene_dir / 'pc.ply'), pcd)
+    # o3d.io.write_point_cloud(str(scene_dir / 'pc.ply'), pcd)
 
     voxel_down_pcd, _, inverse_index_list = pcd.voxel_down_sample_and_trace(
         voxel_size=voxel_size, min_bound=pcd.get_min_bound(), max_bound=pcd.get_max_bound()
@@ -328,7 +327,7 @@ def main(
     voxOriginCam = np.asarray([
         [0], [0], [1.44]]
     )
-
+    bad_scenes = []
     files = input_color_dir.glob('*.jpg')
     files = sorted(files, key=lambda x: int(x.stem.split('.')[0]))
     for idx, file in tqdm(enumerate(files), total=len(files)):
@@ -351,7 +350,7 @@ def main(
 
         # 缩放深度图
         h, w, _ = image.shape
-        depth = cv2.resize(depth, (w, h))
+        depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST)
 
         # 加载相机位姿
         pose_file = input_pose_dir / f'{frame_key}.txt'
@@ -490,7 +489,117 @@ def main(
             frame_pcd4.colors = o3d.utility.Vector3dVector(color_map[unknown_sem_frame_voxels[:, -1].astype(int)] / 255)
             o3d.io.write_point_cloud(str(output_dir / f'{frame_key}_unknown_sem.ply'), frame_pcd4)
         #######
-        # TODO 根据条件过滤一些体素
+
+        # ===================================================================
+        # 2025-06-26
+        # Start <<< 可见性过滤 >>>
+        # ===================================================================
+        # 在这里，`final_labeled_voxels` 包含了当前帧附近的所有体素及其初步标签 (0=empty, 1-12=sem, 255=unknown)
+        # 我们现在要基于深度图，把被遮挡的体素找出来，并把它们的标签设为0 (empty)
+
+        # 1. 获取所有体素点的世界坐标和当前标签
+        voxel_coords = frame_voxels[:, :3]
+        voxel_labels = frame_voxels[:, -1]
+
+        # 2. 将所有体素点转换到相机坐标系
+        world2cam = np.linalg.inv(cam2world)
+        voxels_cam = (world2cam[:3, :3] @ voxel_coords.T + world2cam[:3, -1:]).T
+
+        # 3. 投影到像素平面
+        voxels_pix = (intrinsics[:3, :3] @ voxels_cam.T).T
+
+        depths_in_cam = voxels_cam[:, 2]
+        # 防止除以零
+        depths_in_cam[depths_in_cam <= 0] = 1e6  # 把相机后方的点深度设为极大值，使其在后续比较中被自然剔除
+
+        us = (voxels_pix[:, 0] / depths_in_cam).astype(int)
+        vs = (voxels_pix[:, 1] / depths_in_cam).astype(int)
+
+        # 4. 创建一个遮挡掩码，初始假设所有点都未被遮挡
+        # 我们只关心那些有标签的体素（非empty, 非unknown）
+        occlusion_mask = np.zeros_like(voxel_labels, dtype=bool)
+
+        # 5. 筛选出需要进行深度测试的体素
+        # 条件：a. 在图像范围内 b. 在相机前方 c. 有一个有效的语义标签 (不是empty也不是unknown)
+        test_indices = np.where(
+            (us >= 0) & (us < w) &
+            (vs >= 0) & (vs < h) &
+            (depths_in_cam > 0) &
+            (voxel_labels > 0) & (voxel_labels != 255)
+        )[0]
+
+        if len(test_indices) > 0:
+            # 获取这些待测点的像素坐标和计算深度
+            test_us = us[test_indices]
+            test_vs = vs[test_indices]
+            test_depths = depths_in_cam[test_indices]
+
+            # 获取深度图中对应位置的深度值
+            gt_depth_values = depth[test_vs, test_us]
+
+            # 识别被遮挡的点：其计算深度显著大于GT深度
+            is_occluded = test_depths > (gt_depth_values + voxel_size * 5)
+
+            # 将被遮挡的点的索引更新到遮挡掩码中
+            occluded_indices = test_indices[is_occluded]
+            occlusion_mask[occluded_indices] = True
+
+        # 6. 应用遮挡掩码：将被遮挡的体素标签设为0 (empty)
+        final_labels = voxel_labels.copy()
+        final_labels[occlusion_mask] = 0
+        frame_voxels[:, -1] = final_labels
+
+        # [Debug Visualization - 可选]
+        if vis_debug:
+            # 可视化过滤后的结果
+            visible_voxels = np.hstack((gridPtsWorld, final_labels.reshape(-1, 1)))
+            visible_voxels = visible_voxels[np.logical_and(visible_voxels[:, -1] > 0, visible_voxels[:, -1] < 13)]
+
+            if len(visible_voxels) > 0:
+                frame_pcd_filtered = o3d.geometry.PointCloud()
+                frame_pcd_filtered.points = o3d.utility.Vector3dVector(visible_voxels[:, :3])
+                frame_pcd_filtered.colors = o3d.utility.Vector3dVector(
+                    color_map[visible_voxels[:, -1].astype(int)] / 255)
+                o3d.io.write_point_cloud(str(output_dir / f'{frame_key}_final_visible.ply'), frame_pcd_filtered)
+
+        # ===================================================================
+        # End <<<  最终可见性过滤 >>>
+        # ===================================================================
+        #
+
+        # ===================================================================
+        # 2025-06-26
+        # Start <<< 好坏体素检验 >>>
+        # ===================================================================
+        cnt = Counter(final_labels)
+        total = 0
+        valid = 0
+        for i in cnt.keys():
+            total += cnt[i]
+            if i != 0.0 and i != 255.0:
+                valid += 1
+        outroom = cnt[255.0]
+        empty = cnt[0.0]
+
+        if valid < 2:
+            bad_scenes.append(frame_key)
+            continue
+
+        if (outroom / total) > 0.95:
+            bad_scenes.append(frame_key)
+            continue
+
+        if (empty / total) > 0.95:
+            bad_scenes.append(frame_key)
+            continue
+
+        if ((empty + outroom) / total) > 0.995:
+            bad_scenes.append(frame_key)
+            continue
+        # ===================================================================
+        # 2025-06-26
+        # End <<<  好坏体素检验 >>>
+        # ===================================================================
 
         ###### 保存
         target_1_4 = frame_voxels[:, -1].reshape(60, 60, 36)
@@ -500,11 +609,13 @@ def main(
             'depth_gt': str(input_depth_dir / f'{frame_key}.png'),
             'cam_pose': pose,  # camera to world
             'intrinsic': intrinsics,
-            'target_1_4': target_1_4,
+            'target_1_4': target_1_4,  # 1_4 表示下采样了4倍, 8cm
             'voxel_origin': np.array([frame_voxels[:, 0].min(), frame_voxels[:, 1].min(), frame_voxels[:, 2].min()]),
         }
         with open(str(output_dir / f'{frame_key}.pkl'), "wb") as handle:
             pickle.dump(pkl_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print("bad scenes:", bad_scenes)
 
 
 def arg_parser():

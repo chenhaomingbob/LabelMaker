@@ -48,6 +48,10 @@ fi
 echo "[INFO] 统计完成：共发现 ${total_dirs} 个子目录需要处理。"
 echo "" # 增加空行，方便阅读
 
+
+# 初始化成功处理计数器
+success_count=0
+
 # 遍历父目录下的所有第一层子目录
 # "$PARENT_DIR"/*/ 这个通配符会匹配所有子目录
 for workspace in "$PARENT_DIR"/*/; do
@@ -95,6 +99,9 @@ for workspace in "$PARENT_DIR"/*/; do
     python labelmaker/occupancy/mesh2occupancy.py  --workspace "$workspace"
     echo "[SUCCESS] 转换完成。"
 
+    # 成功处理一个场景，计数器加一
+    ((success_count++))
+
 
     workspace_end_time=$SECONDS
     workspace_duration=$((workspace_end_time - workspace_start_time))
@@ -109,7 +116,9 @@ done
 end_time=$SECONDS
 duration=$((end_time - start_time))
 
+# 输出成功处理的场景个数
 echo "=========================================================="
+echo "共成功处理了 ${success_count} 个场景。"
 echo "所有 ${total_dirs} 个子目录均已处理完毕。"
 printf "脚本总耗时: %d 分 %d 秒\n" $((duration / 60)) $((duration % 60))
 echo "=========================================================="

@@ -39,8 +39,8 @@ process_single_workspace() {
     local ws_start_time=$SECONDS
 
     # 检查 'intermediate' 文件夹
-    if [ -d "$workspace/intermediate" ]; then
-        echo "[GPU ${gpu_id}] 检测到 'intermediate' 文件夹，跳过: $workspace"
+    if [ -d "$workspace/intermediate/occ11_san_1" ]; then
+        echo "[GPU ${gpu_id}] 检测到 'intermediate/occ11_san_1_flip' 文件夹，跳过: $workspace"
         touch "$STATUS_DIR/$(basename "$workspace").success"
         return 0
     fi
@@ -81,9 +81,11 @@ process_single_workspace() {
 export -f process_single_workspace
 export STATUS_DIR
 
+PROCS_PER_GPU=2  # 每个GPU并行处理的最大任务数
 # --- 4. 任务分配与并行执行 (新逻辑) ---
 echo "=========================================================="
 echo ">>> 开始扫描并分配任务到各个GPU..."
+echo ">>> 每个GPU将并行运行最多 ${PROCS_PER_GPU} 个任务。"
 echo "=========================================================="
 overall_start_time=$SECONDS
 
@@ -96,20 +98,55 @@ if [ "$total_workspaces" -eq 0 ]; then
 fi
 echo "[INFO] 共发现 ${total_workspaces} 个工作区需要检查和处理。"
 
+## 为每个GPU启动一个独立的“任务处理器”
+#for (( gpu_id=0; gpu_id<NUM_GPUS; gpu_id++ )); do
+#    # 这个括号内的代码块会在一个子shell中异步执行
+#    (
+#        # 设置当前处理器可见的GPU
+#        export CUDA_VISIBLE_DEVICES=$gpu_id
+#        echo "[INFO] GPU ${gpu_id} 任务处理器已启动。"
+#
+#        # 遍历所有工作区，只处理分配给自己的任务
+#        for (( i=gpu_id; i<total_workspaces; i+=NUM_GPUS )); do
+#            workspace_path="${all_workspaces[i]}"
+#            # 调用核心处理函数
+#            process_single_workspace "$workspace_path"
+#        done
+#    ) & # & 符号表示将这个子shell放到后台运行
+#done
+
+
 # 为每个GPU启动一个独立的“任务处理器”
 for (( gpu_id=0; gpu_id<NUM_GPUS; gpu_id++ )); do
     # 这个括号内的代码块会在一个子shell中异步执行
     (
-        # 设置当前处理器可见的GPU
+        # Set the visible GPU for this specific subshell
         export CUDA_VISIBLE_DEVICES=$gpu_id
+        echo "[INFO] GPU ${gpu_id} 任务处理器已启动。"
 
-        # 遍历所有工作区，只处理分配给自己的任务
+        # Iterate through all workspaces assigned to this GPU
         for (( i=gpu_id; i<total_workspaces; i+=NUM_GPUS )); do
+            # *** JOB CONTROL LOGIC START ***
+            # Check the number of active background jobs in this subshell
+            # and wait if the limit is reached.
+            while [[ $(jobs -p | wc -l) -ge $PROCS_PER_GPU ]]; do
+                # Wait for any single job to finish before checking again
+                wait -n
+            done
+            # *** JOB CONTROL LOGIC END ***
+
             workspace_path="${all_workspaces[i]}"
-            # 调用核心处理函数
-            process_single_workspace "$workspace_path"
+
+            # Call the core processing function IN THE BACKGROUND
+            process_single_workspace "$workspace_path" &
         done
-    ) & # & 符号表示将这个子shell放到后台运行
+
+        # After the loop, wait for all remaining background jobs for this GPU to complete
+        echo "[INFO] GPU ${gpu_id}: 所有任务已启动，正在等待处理完成..."
+        wait
+        echo "[INFO] GPU ${gpu_id}: 所有任务处理完毕。"
+
+    ) & # & places this entire per-GPU handler into the background
 done
 
 # 等待所有后台的GPU处理器完成任务

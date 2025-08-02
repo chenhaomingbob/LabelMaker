@@ -34,14 +34,14 @@ def process_single_scan(scan_dir, target_base_dir, args_dict):
     target_dir = join(target_base_dir, scan_name)
 
     # 检查是否应该跳过处理
-    if should_skip_process(scan_dir, target_dir, args_dict):
-        return {
-            'name': scan_name,
-            'status': 'skipped',
-            'message': '输出文件已存在，跳过处理',
-            'stdout': '',  # 添加空输出
-            'stderr': ''  # 添加空错误
-        }
+    # if should_skip_process(scan_dir, target_dir, args_dict):
+    #     return {
+    #         'name': scan_name,
+    #         'status': 'skipped',
+    #         'message': '输出文件已存在，跳过处理',
+    #         'stdout': '',  # 添加空输出
+    #         'stderr': ''  # 添加空错误
+    #     }
 
     cmd = [
         'python',

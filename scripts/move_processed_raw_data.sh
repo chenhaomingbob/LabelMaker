@@ -23,7 +23,7 @@ RAW_DATA_DIR="/data1/chm/datasets/arkitscenes/raw/Training"
 PREPROCESSED_DIR="/data1/chm/datasets/arkitscenes/LabelMaker/Training"
 
 # 归档文件夹的路径 (移动到这里)
-DESTINATION_DIR="/mnt/WD/arkitscenes"
+DESTINATION_DIR="/mnt/temp/arkitscenes"
 
 # 【新增】Metadata CSV文件的路径 (假设与脚本在同一目录)
 METADATA_CSV="/data1/chm/datasets/arkitscenes/LabelMaker/metadata_updated.csv"

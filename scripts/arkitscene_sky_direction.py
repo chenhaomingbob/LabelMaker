@@ -61,7 +61,7 @@ def calculate_representative_directions(dataset_root):
         directions_for_this_scene = []
         pose_files = sorted(glob.glob(os.path.join(pose_dir, '*.txt')))
 
-        pose_files = pose_files[::5]
+        pose_files = pose_files[::10]
         for idx, pose_path in enumerate(pose_files):
             try:
                 world_to_camera_pose = np.linalg.inv(np.loadtxt(pose_path))
